@@ -1,0 +1,21 @@
+allprojects {
+    group = "com.sharedsync"
+    version = "1.0.0"
+
+    repositories {
+        mavenCentral()
+    }
+}
+
+subprojects {
+    apply plugin: "java-library"
+
+    java {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    dependencies {
+        implementation platform("org.springframework.boot:spring-boot-dependencies:3.3.4")
+    }
+}
