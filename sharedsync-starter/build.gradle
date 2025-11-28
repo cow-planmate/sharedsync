@@ -1,7 +1,16 @@
 plugins {
     id "java-library"
+    id "maven-publish"       // ★ 추가
 }
 
 dependencies {
     api(project(":sharedsync-autoconfigure"))
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+        }
+    }
 }

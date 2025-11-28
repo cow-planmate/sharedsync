@@ -1,3 +1,7 @@
+plugins {
+    id "io.spring.dependency-management" version "1.1.7" apply false
+}
+
 allprojects {
     group = "com.sharedsync"
     version = "1.0.0"
@@ -9,6 +13,7 @@ allprojects {
 
 subprojects {
     apply plugin: "java-library"
+    apply plugin: "io.spring.dependency-management"
 
     java {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -16,6 +21,14 @@ subprojects {
     }
 
     dependencies {
-        implementation platform("org.springframework.boot:spring-boot-dependencies:3.3.4")
+        implementation platform("org.springframework.boot:spring-boot-dependencies:3.5.3")
+
+        compileOnly "org.projectlombok:lombok:1.18.34"
+        annotationProcessor "org.projectlombok:lombok:1.18.34"
+
+        testCompileOnly "org.projectlombok:lombok:1.18.34"
+        testAnnotationProcessor "org.projectlombok:lombok:1.18.34"
+
+        testImplementation "org.springframework.boot:spring-boot-starter-test"
     }
 }
