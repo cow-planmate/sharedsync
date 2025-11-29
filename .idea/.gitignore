@@ -1,8 +1,59 @@
-# 디폴트 무시된 파일
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# If you want to commit IDEA run configs, remove the next line
+.idea/runConfigurations/
+
+# Default ignored files
 /shelf/
 /workspace.xml
-# 에디터 기반 HTTP 클라이언트 요청
+
+# Editor-based HTTP client
 /httpRequests/
-# Datasource local storage ignored files
+
+# Datasource local storage
 /dataSources/
 /dataSources.local.xml
+
+
+### Gradle ###
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Log files
+*.log
+
+
+### Java ###
+*.class
+*.jar
+*.war
+*.ear
+
+# Generated sources (annotation processors)
+**/build/generated/**
+**/build/generated-sources/**
+**/build/generated-sources/annotations/**
+**/build/generated/sources/**
+
+# Do NOT commit auto-generated Spring Boot auto config imports
+**/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
+
+
+### OS Specific ###
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+
+### Other ###
+# Local environment configs (optional)
+*.hprof
+*.orig
+*.rej
