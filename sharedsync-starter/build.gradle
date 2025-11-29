@@ -1,16 +1,18 @@
 plugins {
     id "java-library"
-    id "maven-publish"       // ★ 추가
+    id "maven-publish"
 }
 
 dependencies {
+    // AutoConfig 노출
     api(project(":sharedsync-autoconfigure"))
-}
 
-publishing {
-    publications {
-        mavenJava(MavenPublication) {
-            from components.java
-        }
-    }
+    // ★ WebSocket/STOMP/Messaging 필수
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+
+    // ★ Spring Messaging (MessageMapping, SendTo, Payload 등)
+    implementation 'org.springframework:spring-messaging'
+
+    // ★ JSON 직렬화 등 기본 부트 의존성 (필요 시)
+    implementation 'org.springframework.boot:spring-boot-starter'
 }

@@ -4,7 +4,7 @@ plugins {
 
 allprojects {
     group = "com.sharedsync"
-    version = "1.0.0"
+    version = "1.0.1"
 
     repositories {
         mavenCentral()
@@ -13,6 +13,7 @@ allprojects {
 
 subprojects {
     apply plugin: "java-library"
+    apply plugin: "maven-publish"
     apply plugin: "io.spring.dependency-management"
 
     java {
@@ -30,5 +31,25 @@ subprojects {
         testAnnotationProcessor "org.projectlombok:lombok:1.18.34"
 
         testImplementation "org.springframework.boot:spring-boot-starter-test"
+    }
+
+    publishing {
+        publications {
+            mavenJava(MavenPublication) {
+                from components.java
+            }
+        }
+
+        repositories {
+            maven {
+                name = "GitHubPackages"
+                url = uri("https://maven.pkg.github.com/cow-planmate/sharedsync")
+
+                credentials {
+                    username = System.getenv("GITHUB_ACTOR") ?: project.findProperty("gpr.user")
+                    password = System.getenv("GITHUB_TOKEN") ?: project.findProperty("gpr.key")
+                }
+            }
+        }
     }
 }

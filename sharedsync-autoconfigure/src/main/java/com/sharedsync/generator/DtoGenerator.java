@@ -56,13 +56,29 @@ public class DtoGenerator {
         return true;
     }
 
-    private static String writeEntityPath(CacheInformation cacheInfo){
-        String path = "import com.example.planmate.domain.plan.entity." + cacheInfo.getEntityName() + ";\n";
-        for (RelatedEntity relatedEntity : cacheInfo.getRelatedEntities()) {
-            path += "import " + relatedEntity.getEntityPath() + ";\n";
+    private static String writeEntityPath(CacheInformation cacheInfo) {
+        StringBuilder sb = new StringBuilder();
+
+        // 1) 현재 DTO가 생성되는 대상 엔티티 경로 자동 import
+        // cacheInfo.getEntityPath() = "com.myapp.domain.todo.entity.Todo"
+        if (cacheInfo.getEntityPath() != null) {
+            sb.append("import ")
+                    .append(cacheInfo.getEntityPath())
+                    .append(";\n");
         }
-        return path;
+
+        // 2) @ManyToOne 등으로 연결된 다른 엔티티들도 자동 import
+        for (RelatedEntity relatedEntity : cacheInfo.getRelatedEntities()) {
+            if (relatedEntity.getEntityPath() != null) {
+                sb.append("import ")
+                        .append(relatedEntity.getEntityPath())
+                        .append(";\n");
+            }
+        }
+
+        return sb.toString();
     }
+
 
     private static String writeAutoDatabaseLoader (CacheInformation cacheInfo) {
         if(cacheInfo.getParentEntityPath() == null || cacheInfo.getParentId() == null) {
