@@ -8,11 +8,14 @@ dependencies {
     api(project(":sharedsync-autoconfigure"))
 
     // ★ WebSocket/STOMP/Messaging 필수
-    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+    api 'org.springframework.boot:spring-boot-starter-websocket'
 
     // ★ Spring Messaging (MessageMapping, SendTo, Payload 등)
-    implementation 'org.springframework:spring-messaging'
+    api 'org.springframework:spring-messaging'
 
     // ★ JSON 직렬화 등 기본 부트 의존성 (필요 시)
-    implementation 'org.springframework.boot:spring-boot-starter'
+    api 'org.springframework.boot:spring-boot-starter'
+
+    // ★ Redis 필수
+    api 'org.springframework.boot:spring-boot-starter-data-redis'
 }

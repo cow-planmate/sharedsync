@@ -22,182 +22,277 @@ public class DtoGenerator {
     }
 
     public static boolean process(CacheInformation cacheInfo, ProcessingEnvironment processingEnv) {
-        
 
-        String source = "package " + cacheInfo.getDtoPath() + ";\n"
-            + "import com.sharedsync.shared.annotation.*;\n"
-            + "import lombok.*;\n"
-            + "import com.sharedsync.shared.dto.CacheDto;\n"
-            + writeEntityPath(cacheInfo) 
-            + "@Cache\n"
-            + "@AllArgsConstructor\n"
-            + "@NoArgsConstructor\n"
-            + "@Getter\n"
-            + "@Setter\n"
-            + writeAutoDatabaseLoader(cacheInfo)
-            + writeAutoEntityConverter(cacheInfo)
-            + "public class " + cacheInfo.getDtoClassName() + " extends CacheDto<" + cacheInfo.getIdType() + "> {\n\n"
-            + writeDtoFields(cacheInfo)
-            + writeFromEntityMethod(cacheInfo)
-            + writeToEntityMethod(cacheInfo)
-            + "}";
+        String source =
+                "package " + cacheInfo.getDtoPath() + ";\n"
+                        + "import com.sharedsync.shared.annotation.*;\n"
+                        + "import lombok.*;\n"
+                        + "import com.sharedsync.shared.dto.CacheDto;\n"
+                        + writeEntityPath(cacheInfo)
+                        + "@Cache\n"
+                        + "@AllArgsConstructor\n"
+                        + "@NoArgsConstructor\n"
+                        + "@Getter\n"
+                        + "@Setter\n"
+                        + writeAutoDatabaseLoader(cacheInfo)
+                        + writeAutoEntityConverter(cacheInfo)
+                        + "public class " + cacheInfo.getDtoClassName()
+                        + " extends CacheDto<" + cacheInfo.getIdType() + "> {\n\n"
+                        + writeDtoFields(cacheInfo)
+                        + writeFromEntityMethod(cacheInfo)
+                        + writeToEntityMethod(cacheInfo)
+                        + "}";
 
-
-        // 파일 생성
         try {
-            JavaFileObject file = processingEnv.getFiler().createSourceFile(cacheInfo.getDtoPath() + "." + cacheInfo.getDtoClassName());
-            Writer writer = file.openWriter();
-            writer.write(source);
-            writer.close();
+            JavaFileObject file = processingEnv.getFiler().createSourceFile(
+                    cacheInfo.getDtoPath() + "." + cacheInfo.getDtoClassName());
+            try (Writer writer = file.openWriter()) {
+                writer.write(source);
+            }
         } catch (IOException e) {
             e.printStackTrace();
         }
-        
+
         return true;
     }
 
+    // ==========================================
+    // helper: ManyToOne 타입 매칭 정확히 처리
+    // ==========================================
+    private static boolean isSameEntity(FieldInfo fieldInfo, RelatedEntity related) {
+        String fieldType = fieldInfo.getType();         // ex) practice...User 또는 User
+        String simple = Generator.removePath(related.getEntityPath()); // User
+
+        return fieldType.endsWith("." + simple)
+                || fieldType.equals(simple)
+                || fieldType.endsWith("$" + simple);
+    }
+
+    // ==========================================
+    // Imports
+    // ==========================================
     private static String writeEntityPath(CacheInformation cacheInfo) {
         StringBuilder sb = new StringBuilder();
 
-        // 1) 현재 DTO가 생성되는 대상 엔티티 경로 자동 import
-        // cacheInfo.getEntityPath() = "com.myapp.domain.todo.entity.Todo"
         if (cacheInfo.getEntityPath() != null) {
-            sb.append("import ")
-                    .append(cacheInfo.getEntityPath())
-                    .append(";\n");
+            sb.append("import ").append(cacheInfo.getEntityPath()).append(";\n");
         }
 
-        // 2) @ManyToOne 등으로 연결된 다른 엔티티들도 자동 import
         for (RelatedEntity relatedEntity : cacheInfo.getRelatedEntities()) {
             if (relatedEntity.getEntityPath() != null) {
-                sb.append("import ")
-                        .append(relatedEntity.getEntityPath())
+                sb.append("import ").append(relatedEntity.getEntityPath()).append(";\n");
+            }
+        }
+        return sb.toString();
+    }
+
+    // ==========================================
+    // Auto Annotations
+    // ==========================================
+    private static String writeAutoDatabaseLoader(CacheInformation cacheInfo) {
+        if (cacheInfo.getParentEntityPath() == null || cacheInfo.getParentId() == null) {
+            return "";
+        }
+        return "@AutoDatabaseLoader(repository = \"" + Generator.decapitalizeFirst(cacheInfo.getRepositoryName())
+                + "\", method = \"findBy" + Generator.removePath(cacheInfo.getParentEntityPath())
+                + Generator.capitalizeFirst(cacheInfo.getParentId()) + "\")\n";
+    }
+
+    private static String writeAutoEntityConverter(CacheInformation cacheInfo) {
+        if (cacheInfo.getRelatedEntities().isEmpty()) return "";
+
+        StringBuilder repositories = new StringBuilder();
+        List<String> repoList = cacheInfo.getRelatedEntities().stream()
+                .map(RelatedEntity::getRepositoryPath)
+                .toList();
+
+        for (int i = 0; i < repoList.size(); i++) {
+            repositories.append("\"")
+                    .append(Generator.decapitalizeFirst(Generator.removePath(repoList.get(i))))
+                    .append("\"");
+            if (i < repoList.size() - 1) repositories.append(", ");
+        }
+
+        return "@AutoEntityConverter(repositories = {" + repositories + "})\n";
+    }
+
+    // ==========================================
+    // DTO Fields
+    // ==========================================
+    private static String writeDtoFields(CacheInformation cacheInfo) {
+        StringBuilder fields = new StringBuilder();
+        String idName = cacheInfo.getIdName();
+
+        fields.append("    @CacheId\n");
+        fields.append("    private ")
+                .append(cacheInfo.getIdType())
+                .append(" ")
+                .append(idName)
+                .append(";\n");
+
+        for (FieldInfo fieldInfo : cacheInfo.getEntityFields()) {
+
+            if (fieldInfo.getName().equals(idName)) continue;
+
+            // ParentId
+            if (cacheInfo.getParentEntityPath() != null
+                    && isSameEntity(fieldInfo,
+                    cacheInfo.getRelatedEntities().stream()
+                            .filter(re -> re.getEntityPath().equals(cacheInfo.getParentEntityPath()))
+                            .findFirst()
+                            .orElse(null))) {
+
+                RelatedEntity parent = cacheInfo.getRelatedEntities().stream()
+                        .filter(re -> re.getEntityPath().equals(cacheInfo.getParentEntityPath()))
+                        .findFirst().orElse(null);
+
+                String parentSimple = Generator.decapitalizeFirst(Generator.removePath(parent.getEntityPath()));
+                String parentFieldName = parentSimple + Generator.capitalizeFirst(parent.getEntityIdName());
+
+                fields.append("    @ParentId(")
+                        .append(Generator.removePath(parent.getEntityPath()))
+                        .append(".class)\n");
+
+                fields.append("    private ")
+                        .append(parent.getEntityIdType())
+                        .append(" ")
+                        .append(parentFieldName)
+                        .append(";\n");
+
+                continue;
+            }
+
+            // ManyToOne
+            RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
+                    .filter(re -> isSameEntity(fieldInfo, re))
+                    .findFirst()
+                    .orElse(null);
+
+            if (matched != null) {
+                String fkBase = Generator.decapitalizeFirst(Generator.removePath(matched.getEntityPath()));
+                String fkFieldName = fkBase + Generator.capitalizeFirst(matched.getEntityIdName());
+
+                fields.append("    private ")
+                        .append(matched.getEntityIdType())
+                        .append(" ")
+                        .append(fkFieldName)
+                        .append(";\n");
+
+            } else {
+                fields.append("    private ")
+                        .append(fieldInfo.getType())
+                        .append(" ")
+                        .append(fieldInfo.getName())
                         .append(";\n");
             }
         }
 
-        return sb.toString();
-    }
-
-
-    private static String writeAutoDatabaseLoader (CacheInformation cacheInfo) {
-        if(cacheInfo.getParentEntityPath() == null || cacheInfo.getParentId() == null) {
-            return "";
-        } else {
-        String loader = "@AutoDatabaseLoader(repository = \"" + Generator.decapitalizeFirst(cacheInfo.getRepositoryName()) + "\", method = \"findBy" + Generator.removePath(cacheInfo.getParentEntityPath()) + Generator.capitalizeFirst(cacheInfo.getParentId()) + "\")\n";
-        return loader;
-        }
-    }
-
-    private static String writeAutoEntityConverter(CacheInformation cacheInfo) {
-        if (cacheInfo.getRelatedEntities() == null || cacheInfo.getRelatedEntities().isEmpty()) {
-            return "";
-        } else {
-            StringBuilder repositories = new StringBuilder();
-            List<String> repoList = cacheInfo.getRelatedEntities().stream().map(RelatedEntity::getRepositoryPath).toList();
-            for (int i = 0; i < repoList.size(); i++) {
-                repositories.append("\"").append(Generator.decapitalizeFirst(Generator.removePath(repoList.get(i)))).append("\"");
-                if (i < repoList.size() - 1) {
-                    repositories.append(", ");
-                }
-            }
-            String converter = "@AutoEntityConverter(repositories = {" + repositories.toString() + "})\n";
-            return converter;
-        }
-    }
-
-    private static String writeDtoFields(CacheInformation cacheInfo) {
-        StringBuilder fields = new StringBuilder();
-        fields.append("    @CacheId\n");
-        fields.append("    private ").append(cacheInfo.getIdType()).append(" ").append(cacheInfo.getIdName()).append(";\n");
-        
-        for (FieldInfo fieldInfo : cacheInfo.getEntityFields()) {
-            if(cacheInfo.getParentEntityPath() != null && fieldInfo.getName().equals(Generator.decapitalizeFirst(Generator.removePath(cacheInfo.getParentEntityPath())))){
-                RelatedEntity parentEntity = cacheInfo.getRelatedEntities().stream()
-                    .filter(re -> re.getEntityPath().equals(cacheInfo.getParentEntityPath()))
-                    .findFirst()
-                    .orElse(null);
-                fields.append("    @ParentId(").append(Generator.removePath(parentEntity.getEntityPath())).append(".class)\n");
-                fields.append("    private ").append(parentEntity.getEntityIdType()).append(" ").append(parentEntity.getEntityIdName()).append(";\n");
-            }
-            
-
-            else if(!fieldInfo.getName().equals(cacheInfo.getIdName())) {
-                if(cacheInfo.getRelatedEntities().stream().anyMatch(re -> re.getEntityPath().equals(fieldInfo.getType()))){
-                    //private Integer placeCategoryId;
-                    RelatedEntity relatedEntity = cacheInfo.getRelatedEntities().stream()
-                        .filter(re -> re.getEntityPath().equals(fieldInfo.getType()))
-                        .findFirst()
-                        .orElse(null);
-                    fields.append("    private ").append(relatedEntity.getEntityIdType()).append(" ").append(relatedEntity.getEntityIdName()).append(";\n");
-                }
-                else{
-                    fields.append("    private ").append(fieldInfo.getType()).append(" ").append(fieldInfo.getName()).append(";\n");
-                }
-                
-            }
-        }
         fields.append("\n");
         return fields.toString();
     }
 
+    // ==========================================
+    // FromEntity
+    // ==========================================
     private static String writeFromEntityMethod(CacheInformation cacheInfo) {
-        StringBuilder method = new StringBuilder();
-        method.append("    public static ").append(cacheInfo.getDtoClassName()).append(" fromEntity(")
-            .append(cacheInfo.getEntityName()).append(" ").append(Generator.decapitalizeFirst(cacheInfo.getEntityName())).append(") {\n");
-        method.append("        return new ").append(cacheInfo.getDtoClassName()).append("(\n");
-        List<FieldInfo> fields = cacheInfo.getEntityFields();
-        for (int i = 0; i < fields.size(); i++) {
-            FieldInfo field = fields.get(i);
-            if(cacheInfo.getRelatedEntities().stream().anyMatch(re -> re.getEntityPath().equals(field.getType()))){
-                RelatedEntity relatedEntity = cacheInfo.getRelatedEntities().stream()
-                    .filter(re -> re.getEntityPath().equals(field.getType()))
-                    .findFirst()
-                    .orElse(null);
-                method.append("                ").append(Generator.decapitalizeFirst(cacheInfo.getEntityName()))
-                .append(".get").append(Generator.capitalizeFirst(Generator.removePath(relatedEntity.getEntityPath()))).append("()")
-                .append(".get").append(Generator.capitalizeFirst(relatedEntity.getEntityIdName())).append("()");
+        StringBuilder sb = new StringBuilder();
+        String var = Generator.decapitalizeFirst(cacheInfo.getEntityName());
+        String idName = cacheInfo.getIdName();
+
+        sb.append("    public static ").append(cacheInfo.getDtoClassName())
+                .append(" fromEntity(")
+                .append(cacheInfo.getEntityName())
+                .append(" ")
+                .append(var)
+                .append(") {\n");
+
+        sb.append("        return new ").append(cacheInfo.getDtoClassName()).append("(\n");
+        sb.append("                ").append(var).append(".get")
+                .append(Generator.capitalizeFirst(idName)).append("(),\n");
+
+        for (FieldInfo field : cacheInfo.getEntityFields()) {
+
+            if (field.getName().equals(idName)) continue;
+
+            RelatedEntity match = cacheInfo.getRelatedEntities().stream()
+                    .filter(re -> isSameEntity(field, re))
+                    .findFirst().orElse(null);
+
+            if (match != null) {
+                sb.append("                ")
+                        .append(var).append(".get")
+                        .append(Generator.capitalizeFirst(field.getName())).append("()")
+                        .append(".get")
+                        .append(Generator.capitalizeFirst(match.getEntityIdName())).append("(),\n");
+                continue;
             }
-            else{
-                method.append("                ").append(Generator.decapitalizeFirst(cacheInfo.getEntityName()))
-                    .append(".get").append(Generator.capitalizeFirst(field.getName())).append("()");
-            }
-            
-            if (i < fields.size() - 1) {
-                method.append(",\n");
-            } else {
-                method.append("\n");
-            }
+
+            boolean isBoolean =
+                    field.getType().equals("boolean") || field.getType().equals("Boolean");
+            String prefix = isBoolean ? "is" : "get";
+
+            sb.append("                ")
+                    .append(var).append(".")
+                    .append(prefix).append(Generator.capitalizeFirst(field.getName()))
+                    .append("(),\n");
         }
-        method.append("        );\n");
-        method.append("    }\n\n");
-        return method.toString();
+
+        sb.setLength(sb.length() - 2);
+        sb.append("\n        );\n");
+        sb.append("    }\n\n");
+
+        return sb.toString();
     }
 
+    // ==========================================
+    // ToEntity
+    // ==========================================
     private static String writeToEntityMethod(CacheInformation cacheInfo) {
-        StringBuilder method = new StringBuilder();
-        method.append("    @EntityConverter\n");
-        method.append("    public ").append(cacheInfo.getEntityName()).append(" toEntity(");
+        StringBuilder sb = new StringBuilder();
+        String idName = cacheInfo.getIdName();
+
+        sb.append("    @EntityConverter\n");
+        sb.append("    public ").append(cacheInfo.getEntityName()).append(" toEntity(");
+
         List<FieldInfo> fields = cacheInfo.getEntityFields();
         boolean first = true;
+
         for (FieldInfo field : fields) {
             if (field.isManyToOne()) {
-                if (!first) method.append(", ");
-                method.append(Generator.removePath(field.getType())).append(" ").append(field.getName());
+                if (!first) sb.append(", ");
+                sb.append(Generator.removePath(field.getType())).append(" ").append(field.getName());
                 first = false;
             }
         }
-        method.append(") {\n");
-        method.append("        return ").append(cacheInfo.getEntityName()).append(".builder()\n");
+
+        sb.append(") {\n");
+        sb.append("        return ").append(cacheInfo.getEntityName()).append(".builder()\n");
+
         for (FieldInfo field : fields) {
+
+            if (field.getName().equals(idName)) {
+                sb.append("                .")
+                        .append(field.getName()).append("(this.")
+                        .append(field.getName()).append(")\n");
+                continue;
+            }
+
             if (field.isManyToOne()) {
-                method.append("                .").append(field.getName()).append("(").append(field.getName()).append(")\n");
+                sb.append("                .")
+                        .append(field.getName()).append("(")
+                        .append(field.getName()).append(")\n");
             } else {
-                method.append("                .").append(field.getName()).append("(this.").append(field.getName()).append(")\n");
+                sb.append("                .")
+                        .append(field.getName())
+                        .append("(this.")
+                        .append(field.getName())
+                        .append(")\n");
             }
         }
-        method.append("                .build();\n");
-        method.append("    }\n");
-        return method.toString();
+
+        sb.append("                .build();\n");
+        sb.append("    }\n");
+
+        return sb.toString();
     }
 }
