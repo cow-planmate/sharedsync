@@ -1,5 +1,6 @@
 package com.sharedsync.shared.presence.core;
 
+import com.sharedsync.shared.context.FrameworkContext;
 import jakarta.annotation.PostConstruct;
 import org.reflections.Reflections;
 import org.springframework.stereotype.Component;
@@ -16,7 +17,9 @@ public class PresenceRootResolver {
 
     @PostConstruct
     public void init() {
-        Reflections reflections = new Reflections("com.example");
+        String basePackage = FrameworkContext.getBasePackage();
+        Reflections reflections = new Reflections(basePackage);
+
 
         Set<Class<?>> roots = reflections.getTypesAnnotatedWith(PresenceRoot.class);
 

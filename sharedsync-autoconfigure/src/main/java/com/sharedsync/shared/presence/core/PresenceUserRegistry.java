@@ -1,5 +1,6 @@
 package com.sharedsync.shared.presence.core;
 
+import com.sharedsync.shared.context.FrameworkContext;
 import org.reflections.Reflections;
 import org.springframework.stereotype.Component;
 
@@ -18,7 +19,9 @@ public class PresenceUserRegistry {
 
     @PostConstruct
     public void init() {
-        Reflections reflections = new Reflections("com.example"); // TODO: 추후 동적/플러그인화
+        String basePackage = FrameworkContext.getBasePackage();
+        Reflections reflections = new Reflections(basePackage);
+
         Set<Class<?>> annotated = reflections.getTypesAnnotatedWith(PresenceUser.class);
         if (annotated.isEmpty()) return;
 
