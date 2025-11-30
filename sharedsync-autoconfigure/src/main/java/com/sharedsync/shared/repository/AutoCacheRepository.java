@@ -49,6 +49,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     private final Class<?> parentEntityClass;
     private final Method entityConverterMethod;
     private final Field entityIdField;
+    private final Class<ID> idClass;
     private final String redisTemplateBeanName;
     private final String repositoryBeanName;
     private final String loadMethodName;
@@ -79,12 +80,12 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             this.cacheKeyPrefix = dtoClass.getSimpleName().replace("Dto", "").toLowerCase();
         } else {
             this.cacheKeyPrefix = annotationKeyType.toLowerCase();
-        }   
+        }
 
         // @AutoRedisTemplate 어노테이션에서 Redis 템플릿 이름 추출
         String entityName = dtoClass.getSimpleName().replace("Dto", "");
         this.redisTemplateBeanName = Character.toLowerCase(entityName.charAt(0)) + entityName.substring(1) + "Redis";
-        
+
 
         // @AutoDatabaseLoader 어노테이션에서 Repository와 메서드 정보 추출
         AutoDatabaseLoader dbLoaderAnnotation = dtoClass.getAnnotation(AutoDatabaseLoader.class);
@@ -138,11 +139,14 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
         detectedEntityIdField.setAccessible(true);
         this.entityIdField = detectedEntityIdField;
+        @SuppressWarnings("unchecked")
+        Class<ID> detectedIdClass = (Class<ID>) detectedEntityIdField.getType();
+        this.idClass = detectedIdClass;
 
-    this.dtoFields = Arrays.stream(dtoClass.getDeclaredFields())
-        .filter(field -> !Modifier.isStatic(field.getModifiers()))
-        .peek(field -> field.setAccessible(true))
-        .collect(Collectors.collectingAndThen(Collectors.toList(), Collections::unmodifiableList));
+        this.dtoFields = Arrays.stream(dtoClass.getDeclaredFields())
+                .filter(field -> !Modifier.isStatic(field.getModifiers()))
+                .peek(field -> field.setAccessible(true))
+                .collect(Collectors.collectingAndThen(Collectors.toList(), Collections::unmodifiableList));
     }
 
     // ==== CacheRepository 인터페이스 기본 CRUD 구현 ====
@@ -406,6 +410,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     @SuppressWarnings("unchecked")
     private List<T> loadEntitiesByParentId(ID parentId) {
+        parentId = changeType(parentId);
         try {
             Object repository = applicationContext.getBean(repositoryBeanName);
             Method loadMethod = findLoadMethod(repository, parentId);
@@ -428,7 +433,10 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     @SuppressWarnings("unchecked")
     public final DTO loadFromDatabaseById(ID id){
+        id = changeType(id);
+
         try {
+
             Object repository = applicationContext.getBean(repositoryBeanName);
             Method findByIdMethod = resolveFindByIdMethod(repository);
 
@@ -453,6 +461,19 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         } catch (Exception e) {
             throw new RuntimeException("ID로 데이터베이스 로딩 실패: " + id, e);
         }
+    }
+
+    private ID changeType(ID id){
+        if(idClass.isInstance(id)){
+            return id;
+        }
+        if(idClass.getSimpleName().equals("String")){
+            return (ID) id.toString();
+        }
+        if(idClass.getSimpleName().equals("Integer")){
+            return (ID) Integer.valueOf(id.toString());
+        }
+        return null;
     }
 
     /**
@@ -937,10 +958,10 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
         Set<ID> allowedIds = persistentIds == null ? Collections.emptySet()
                 : persistentIds.stream()
-                        .filter(Objects::nonNull)
-                        .filter(id -> entityIdField.getType().isInstance(id))
-                        .map(id -> (ID) id)
-                        .collect(Collectors.toSet());
+                .filter(Objects::nonNull)
+                .filter(id -> entityIdField.getType().isInstance(id))
+                .map(id -> (ID) id)
+                .collect(Collectors.toSet());
 
         List<T> targets = persistedEntities.stream()
                 .filter(entity -> {

@@ -48,7 +48,7 @@ public class CacheInitializer {
     /**
      * 재귀적으로 캐시 로딩
      */
-    private void loadRecursively(AutoCacheRepository repo, String id) {
+    private void loadRecursively(AutoCacheRepository repo, Object id) {
 
         // 1) 루트/부모 DTO 로드
         CacheDto<?> dto = repo.loadFromDatabaseById(id);
@@ -72,10 +72,11 @@ public class CacheInitializer {
             for (var childDto : children) {
                 Object childId = childRepo.extractIdUnchecked(childDto);
                 childRepo.saveUnchecked(childDto);
-                loadRecursively(childRepo, (String) childId);
+                loadRecursively(childRepo, childId);
             }
         }
     }
+
 
     /**
      * ParentId 없는 엔티티 = 루트
