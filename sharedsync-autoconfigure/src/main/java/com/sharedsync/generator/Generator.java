@@ -118,9 +118,9 @@ public class Generator extends AbstractProcessor {
     public static String normalizeType(String type) {
 
         // 패키지 제거
-        String pure = removePath(type);
+//        String pure = removePath(type);
 
-        return switch (pure) {
+        return switch (type) {
             case "int" -> "Integer";
             case "long" -> "Long";
             case "short" -> "Short";
@@ -129,7 +129,7 @@ public class Generator extends AbstractProcessor {
             case "float" -> "Float";
             case "double" -> "Double";
             case "char" -> "Character";
-            default -> pure; // wrapper or class name 그대로
+            default -> type; // wrapper or class name 그대로
         };
     }
 

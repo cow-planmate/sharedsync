@@ -61,7 +61,13 @@ public class ServiceGenerator {
 		source.append("        }\n");
 		source.append("        java.util.List<").append(cacheInfo.getDtoClassName())
 				.append("> sanitized = payload.stream()\n");
-		source.append("            .map(dto -> dto.<").append(cacheInfo.getDtoClassName()).append(">changeId(null))\n");
+		if (cacheInfo.getIdType().equals("String")) {
+			source.append("            .map(dto -> dto.<").append(cacheInfo.getDtoClassName())
+					.append(">changeId(java.util.UUID.randomUUID().toString()))\n");
+		} else {
+			source.append("            .map(dto -> dto.<").append(cacheInfo.getDtoClassName()).append(">changeId(null))\n");
+		}
+
 		source.append("            .collect(java.util.stream.Collectors.toList());\n");
 		source.append("        java.util.List<").append(cacheInfo.getDtoClassName()).append("> saved = ")
 				.append(cacheBean).append(".saveAll(sanitized);\n");
