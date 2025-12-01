@@ -37,9 +37,11 @@ public class Generator extends AbstractProcessor {
         private String name;
         private String type;
         private boolean isManyToOne;
+        private String originalType;
 
         public FieldInfo(String name, String type, boolean isManyToOne) {
             this.name = name;
+            this.originalType = type;
             this.type = normalizeType(type);
             this.isManyToOne = isManyToOne;
         }
@@ -52,6 +54,7 @@ public class Generator extends AbstractProcessor {
         private String entityIdType;
         private String entityIdName;
         private String repositoryPath;
+        private String entityIdOriginalType;
     }
 
     @Getter
@@ -61,6 +64,7 @@ public class Generator extends AbstractProcessor {
         private String entityName;
         private String idType;
         private String idName;
+        private String idOriginalType;
         private String basicPackagePath;
         private String entityPath;
 
@@ -133,6 +137,20 @@ public class Generator extends AbstractProcessor {
         };
     }
 
+    public static String denormalizeType(String normalizedType, String originalType) {
+        if (originalType != null && isPrimitiveType(originalType)) {
+            return originalType;
+        }
+        return normalizedType;
+    }
+
+    private static boolean isPrimitiveType(String type) {
+        return switch (type) {
+            case "int", "long", "short", "byte", "boolean", "float", "double", "char" -> true;
+            default -> false;
+        };
+    }
+
     // ================================
     // Annotation Processor 메인 처리
     // ================================
@@ -163,6 +181,7 @@ public class Generator extends AbstractProcessor {
                 if (field.getAnnotation(jakarta.persistence.Id.class) != null) {
                     cacheInfo.setIdType(normalizeType(field.asType().toString()));
                     cacheInfo.setIdName(field.getSimpleName().toString());
+                    cacheInfo.setIdOriginalType(field.asType().toString());
                 }
 
                 // ManyToOne 연관 엔티티 처리
@@ -174,6 +193,7 @@ public class Generator extends AbstractProcessor {
                         if (rf.getAnnotation(jakarta.persistence.Id.class) != null) {
                             related.setEntityIdType(normalizeType(rf.asType().toString()));
                             related.setEntityIdName(rf.getSimpleName().toString());
+                            related.setEntityIdOriginalType(rf.asType().toString());
                             break;
                         }
                     }

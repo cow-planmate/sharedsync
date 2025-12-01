@@ -124,8 +124,9 @@ public class DtoGenerator {
         String idName = cacheInfo.getIdName();
 
         fields.append("    @CacheId\n");
+        String idFieldType = Generator.denormalizeType(cacheInfo.getIdType(), cacheInfo.getIdOriginalType());
         fields.append("    private ")
-                .append(cacheInfo.getIdType())
+            .append(idFieldType)
                 .append(" ")
                 .append(idName)
                 .append(";\n");
@@ -147,13 +148,14 @@ public class DtoGenerator {
                         .findFirst().orElse(null);
 
                 String parentFieldName = Generator.decapitalizeFirst(parent.getEntityIdName());
+                String parentFieldType = Generator.denormalizeType(parent.getEntityIdType(), parent.getEntityIdOriginalType());
 
                 fields.append("    @ParentId(")
                         .append(Generator.removePath(parent.getEntityPath()))
                         .append(".class)\n");
 
                 fields.append("    private ")
-                        .append(parent.getEntityIdType())
+                    .append(parentFieldType)
                         .append(" ")
                         .append(parentFieldName)
                         .append(";\n");
@@ -169,16 +171,18 @@ public class DtoGenerator {
 
             if (matched != null) {
                 String fkFieldName = Generator.decapitalizeFirst(matched.getEntityIdName());
+                String fkFieldType = Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType());
 
                 fields.append("    private ")
-                        .append(matched.getEntityIdType())
+                    .append(fkFieldType)
                         .append(" ")
                         .append(fkFieldName)
                         .append(";\n");
 
             } else {
+                String dtoFieldType = Generator.denormalizeType(fieldInfo.getType(), fieldInfo.getOriginalType());
                 fields.append("    private ")
-                        .append(fieldInfo.getType())
+                    .append(dtoFieldType)
                         .append(" ")
                         .append(fieldInfo.getName())
                         .append(";\n");
@@ -225,8 +229,8 @@ public class DtoGenerator {
                 continue;
             }
 
-            boolean isBoolean =
-                    field.getType().equals("boolean") || field.getType().equals("Boolean");
+                boolean isBoolean =
+                    "boolean".equals(field.getOriginalType()) || "Boolean".equals(field.getType());
             String prefix = isBoolean ? "is" : "get";
 
             sb.append("                ")
