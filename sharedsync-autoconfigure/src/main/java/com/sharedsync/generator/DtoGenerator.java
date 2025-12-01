@@ -168,8 +168,7 @@ public class DtoGenerator {
                     .orElse(null);
 
             if (matched != null) {
-                String fkBase = Generator.decapitalizeFirst(Generator.removePath(matched.getEntityPath()));
-                String fkFieldName = fkBase + Generator.capitalizeFirst(matched.getEntityIdName());
+                String fkFieldName = Generator.decapitalizeFirst(matched.getEntityIdName());
 
                 fields.append("    private ")
                         .append(matched.getEntityIdType())
