@@ -85,8 +85,6 @@ Thumbs.db
 # Spring Boot AutoConfig generated metadata
 # ==========================
 
-# Must NOT commit auto-generated AutoConfiguration.imports!
-**/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
 
 
 # ==========================
