@@ -1,12 +1,12 @@
 package com.sharedsync.shared.autoConfig;
 
-import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 
 import com.sharedsync.shared.presence.core.SharedPresenceFacade;
 import com.sharedsync.shared.presence.storage.PresenceStorage;
 
-@AutoConfiguration
+@Configuration
 public class SharedPresenceAutoConfig {
 
     @Bean
