@@ -2,6 +2,7 @@ package com.sharedsync.shared.auth;
 
 import java.util.Map;
 
+import com.sharedsync.shared.config.SharedSyncAuthProperties;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.stereotype.Component;
@@ -16,10 +17,17 @@ import lombok.RequiredArgsConstructor;
 public class JwtHandshakeInterceptor implements HandshakeInterceptor {
 
     private final AuthenticationTokenResolver tokenResolver;
+    private final SharedSyncAuthProperties authProperties; // ← 추가됨
 
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
                                    WebSocketHandler wsHandler, Map<String, Object> attributes) {
+
+        // 🚀 데모 모드: 인증 완전 비활성화
+        if (!authProperties.isEnabled()) {
+            return true;
+        }
+
         try {
             String token = extractToken(request);
             if (token == null || token.isBlank()) {
@@ -45,20 +53,6 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
                                WebSocketHandler h, Exception ex) {}
 
     private String extractToken(ServerHttpRequest request) {
-        if (request instanceof org.springframework.http.server.ServletServerHttpRequest sreq) {
-            String query = sreq.getServletRequest().getQueryString();
-            if (query != null) {
-                for (String part : query.split("&")) {
-                    String[] kv = part.split("=", 2);
-                    if (kv.length == 2 && "token".equals(kv[0])) {
-                        try {
-                            return java.net.URLDecoder.decode(kv[1], java.nio.charset.StandardCharsets.UTF_8);
-                        } catch (Exception ignore) {}
-                    }
-                }
-            }
-        }
-
         var headers = request.getHeaders();
         String auth = headers.getFirst("Authorization");
         if (auth != null && auth.startsWith("Bearer ")) {
@@ -67,4 +61,5 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
         return null;
     }
 }
+
 
