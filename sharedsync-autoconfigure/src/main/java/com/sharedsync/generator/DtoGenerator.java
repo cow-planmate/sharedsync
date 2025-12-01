@@ -146,8 +146,7 @@ public class DtoGenerator {
                         .filter(re -> re.getEntityPath().equals(cacheInfo.getParentEntityPath()))
                         .findFirst().orElse(null);
 
-                String parentSimple = Generator.decapitalizeFirst(Generator.removePath(parent.getEntityPath()));
-                String parentFieldName = parentSimple + Generator.capitalizeFirst(parent.getEntityIdName());
+                String parentFieldName = Generator.decapitalizeFirst(parent.getEntityIdName());
 
                 fields.append("    @ParentId(")
                         .append(Generator.removePath(parent.getEntityPath()))
