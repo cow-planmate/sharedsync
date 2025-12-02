@@ -1,9 +1,9 @@
 package com.sharedsync.shared.autoConfig;
 
+import com.sharedsync.shared.properties.SharedSyncWebSocketProperties;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
-import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
@@ -13,20 +13,21 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
  * Starter 의존성만 추가하면 WebSocket 환경이 항상 자동 구성된다.
  */
 @AutoConfiguration
-@Configuration
 @EnableWebSocketMessageBroker
+@EnableConfigurationProperties(SharedSyncWebSocketProperties.class)
 public class SharedSyncWebSocketAutoConfig implements WebSocketMessageBrokerConfigurer {
+
+    private final SharedSyncWebSocketProperties props;
+
+    public SharedSyncWebSocketAutoConfig(SharedSyncWebSocketProperties props) {
+        this.props = props;
+    }
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        registry.addEndpoint("/ws-sharedsync")
-                .setAllowedOriginPatterns("*")
+        registry.addEndpoint(props.getEndpoint()) // ← YAML 반영됨
+                .setAllowedOrigins(props.getAllowedOrigins().toArray(new String[0]))
                 .withSockJS();
     }
-
-    @Override
-    public void configureMessageBroker(MessageBrokerRegistry registry) {
-        registry.enableSimpleBroker("/topic");
-        registry.setApplicationDestinationPrefixes("/app");
-    }
 }
+

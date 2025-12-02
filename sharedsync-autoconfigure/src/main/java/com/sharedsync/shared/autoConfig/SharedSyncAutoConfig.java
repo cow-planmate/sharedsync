@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 
 import com.sharedsync.shared.config.RedisConfig;
-import com.sharedsync.shared.config.SharedSyncWebSocketProperties;
+import com.sharedsync.shared.properties.SharedSyncWebSocketProperties;
 import com.sharedsync.shared.config.SharedWebSocketConfig;
 
 @Configuration

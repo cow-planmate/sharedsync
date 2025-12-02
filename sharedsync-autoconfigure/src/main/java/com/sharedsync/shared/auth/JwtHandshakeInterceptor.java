@@ -2,7 +2,7 @@ package com.sharedsync.shared.auth;
 
 import java.util.Map;
 
-import com.sharedsync.shared.config.SharedSyncAuthProperties;
+import com.sharedsync.shared.properties.SharedSyncAuthProperties;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.stereotype.Component;

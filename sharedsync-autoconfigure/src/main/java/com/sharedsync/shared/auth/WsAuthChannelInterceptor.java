@@ -3,7 +3,7 @@ package com.sharedsync.shared.auth;
 import java.security.Principal;
 import java.util.List;
 
-import com.sharedsync.shared.config.SharedSyncAuthProperties;
+import com.sharedsync.shared.properties.SharedSyncAuthProperties;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;

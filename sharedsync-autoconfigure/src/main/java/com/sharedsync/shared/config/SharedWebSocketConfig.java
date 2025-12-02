@@ -3,6 +3,7 @@ package com.sharedsync.shared.config;
 import java.util.Collections;
 import java.util.List;
 
+import com.sharedsync.shared.properties.SharedSyncWebSocketProperties;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;

@@ -1,4 +1,4 @@
-package com.sharedsync.shared.config;
+package com.sharedsync.shared.properties;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
