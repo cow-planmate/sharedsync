@@ -473,6 +473,9 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         if(idClass.getSimpleName().equals("Integer")){
             return (ID) Integer.valueOf(id.toString());
         }
+        if(idClass.getSimpleName().equals("Long")){
+            return (ID) Long.valueOf(id.toString());
+        }
         return null;
     }
 
