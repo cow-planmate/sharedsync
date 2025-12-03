@@ -220,20 +220,27 @@ public class DtoGenerator {
 
             if (match != null) {
                 sb.append("                ");
-                if(field.getType().equals("java.lang.Boolean") || field.getType().equals("Boolean")){
-                    sb.append(var).append(".is");
-                } else {
-                    sb.append(var).append(".get");
-                }
-                sb.append(Generator.capitalizeFirst(field.getName())).append("()")
+                sb.append(var).append(".get")
+                        .append(Generator.capitalizeFirst(field.getName())).append("()")
                         .append(".get")
                         .append(Generator.capitalizeFirst(match.getEntityIdName())).append("(),\n");
                 continue;
             }
 
                 boolean isBoolean =
-                    "boolean".equals(field.getOriginalType()) || "Boolean".equals(field.getType());
-            String prefix = isBoolean ? "is" : "get";
+                    "boolean".equals(field.getOriginalType()) || "Boolean".equals(field.getType()) || "java.lang.Boolean".equals(field.getType());
+
+            boolean nameStartsWithIs = field.getName().startsWith("is")
+                    && field.getName().length() > 2
+                    && Character.isUpperCase(field.getName().charAt(2));
+
+            String prefix;
+            if (nameStartsWithIs) {
+                // field already starts with 'is' (e.g. isDeleted) -> use getIsDeleted() to match Lombok/JavaBean for such fields
+                prefix = "get";
+            } else {
+                prefix = isBoolean ? "is" : "get";
+            }
 
             sb.append("                ")
                     .append(var).append(".")
