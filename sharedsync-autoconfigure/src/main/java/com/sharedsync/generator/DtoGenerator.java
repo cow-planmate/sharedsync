@@ -219,9 +219,13 @@ public class DtoGenerator {
                     .findFirst().orElse(null);
 
             if (match != null) {
-                sb.append("                ")
-                        .append(var).append(".get")
-                        .append(Generator.capitalizeFirst(field.getName())).append("()")
+                sb.append("                ");
+                if(field.getType().equals("java.lang.Boolean") || field.getType().equals("boolean")){
+                    sb.append(var).append(".is");
+                } else {
+                    sb.append(var).append(".get");
+                }
+                sb.append(Generator.capitalizeFirst(field.getName())).append("()")
                         .append(".get")
                         .append(Generator.capitalizeFirst(match.getEntityIdName())).append("(),\n");
                 continue;
