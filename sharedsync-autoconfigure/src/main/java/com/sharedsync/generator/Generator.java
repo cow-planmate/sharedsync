@@ -53,6 +53,7 @@ public class Generator extends AbstractProcessor {
         private String entityPath;
         private String entityIdType;
         private String entityIdName;
+        private String cacheEntityIdName;
         private String repositoryPath;
         private String entityIdOriginalType;
     }
@@ -64,6 +65,7 @@ public class Generator extends AbstractProcessor {
         private String entityName;
         private String idType;
         private String idName;
+        private String cacheEntityIdName;
         private String idOriginalType;
         private String basicPackagePath;
         private String entityPath;
@@ -163,6 +165,7 @@ public class Generator extends AbstractProcessor {
 
             String entityName = element.getSimpleName().toString();
             cacheInfo.setEntityName(entityName);
+            cacheInfo.setCacheEntityIdName("cache"+ entityName + "Id");
             cacheInfo.setEntityPath(element.asType().toString());
 
             // -------------------------------
@@ -188,11 +191,14 @@ public class Generator extends AbstractProcessor {
                 if (field.getAnnotation(jakarta.persistence.ManyToOne.class) != null) {
                     RelatedEntity related = new RelatedEntity();
                     related.setEntityPath(field.asType().toString());
+                    String relatedEntityName = removePath(field.asType().toString());
 
                     for (Element rf : ((TypeElement) ((DeclaredType) field.asType()).asElement()).getEnclosedElements()) {
                         if (rf.getAnnotation(jakarta.persistence.Id.class) != null) {
                             related.setEntityIdType(normalizeType(rf.asType().toString()));
                             related.setEntityIdName(rf.getSimpleName().toString());
+                            related.setCacheEntityIdName("cache"+relatedEntityName + "Id");
+                            System.out.println("cache"+relatedEntityName + "Id");
                             related.setEntityIdOriginalType(rf.asType().toString());
                             break;
                         }

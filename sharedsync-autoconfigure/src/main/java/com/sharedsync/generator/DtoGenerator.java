@@ -121,19 +121,17 @@ public class DtoGenerator {
     // ==========================================
     private static String writeDtoFields(CacheInformation cacheInfo) {
         StringBuilder fields = new StringBuilder();
-        String idName = cacheInfo.getIdName();
 
         fields.append("    @CacheId\n");
-        String idFieldType = Generator.denormalizeType(cacheInfo.getIdType(), cacheInfo.getIdOriginalType());
         fields.append("    private ")
-            .append(idFieldType)
+            .append(cacheInfo.getIdType())
                 .append(" ")
-                .append(idName)
+                .append(cacheInfo.getCacheEntityIdName())
                 .append(";\n");
 
         for (FieldInfo fieldInfo : cacheInfo.getEntityFields()) {
 
-            if (fieldInfo.getName().equals(idName)) continue;
+            if (fieldInfo.getName().equals(cacheInfo.getIdName())) continue;
 
             // ParentId
             if (cacheInfo.getParentEntityPath() != null
@@ -147,7 +145,7 @@ public class DtoGenerator {
                         .filter(re -> re.getEntityPath().equals(cacheInfo.getParentEntityPath()))
                         .findFirst().orElse(null);
 
-                String parentFieldName = Generator.decapitalizeFirst(parent.getEntityIdName());
+                String parentFieldName = parent.getCacheEntityIdName();
                 String parentFieldType = Generator.denormalizeType(parent.getEntityIdType(), parent.getEntityIdOriginalType());
 
                 fields.append("    @ParentId(")
@@ -170,7 +168,7 @@ public class DtoGenerator {
                     .orElse(null);
 
             if (matched != null) {
-                String fkFieldName = Generator.decapitalizeFirst(matched.getEntityIdName());
+                String fkFieldName = matched.getCacheEntityIdName();
                 String fkFieldType = Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType());
 
                 fields.append("    private ")
@@ -273,9 +271,13 @@ public class DtoGenerator {
         for (FieldInfo field : fields) {
 
             if (field.getName().equals(idName)) {
-                sb.append("                .")
-                        .append(field.getName()).append("(this.")
-                        .append(field.getName()).append(")\n");
+                sb.append("                .").append(field.getName()).append("(this.");
+                if(field.getName().equals(cacheInfo.getIdName())){
+                    sb.append(cacheInfo.getCacheEntityIdName()).append(")\n");
+                }
+                else{
+                    sb.append(field.getName()).append(")\n");
+                }
                 continue;
             }
 
