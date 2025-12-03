@@ -198,7 +198,6 @@ public class Generator extends AbstractProcessor {
                             related.setEntityIdType(normalizeType(rf.asType().toString()));
                             related.setEntityIdName(rf.getSimpleName().toString());
                             related.setCacheEntityIdName("cache"+relatedEntityName + "Id");
-                            System.out.println("cache"+relatedEntityName + "Id");
                             related.setEntityIdOriginalType(rf.asType().toString());
                             break;
                         }

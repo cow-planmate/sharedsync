@@ -95,3 +95,5 @@ out/
 **/out/
 *.orig
 *.rej
+
+*.gradle/

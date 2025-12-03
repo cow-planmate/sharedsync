@@ -220,7 +220,7 @@ public class DtoGenerator {
 
             if (match != null) {
                 sb.append("                ");
-                if(field.getType().equals("java.lang.Boolean") || field.getType().equals("boolean")){
+                if(field.getType().equals("java.lang.Boolean") || field.getType().equals("Boolean")){
                     sb.append(var).append(".is");
                 } else {
                     sb.append(var).append(".get");
