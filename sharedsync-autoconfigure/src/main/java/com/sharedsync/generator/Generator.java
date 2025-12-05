@@ -216,6 +216,7 @@ public class Generator extends AbstractProcessor {
                     RelatedEntity related = new RelatedEntity();
                     related.setEntityPath(field.asType().toString());
                     String relatedEntityName = removePath(field.asType().toString());
+                    //
                     System.out.println("EntityName:"+entityName+" Related Entity Detected: " + relatedEntityName);
 
                     for (Element rf : ((TypeElement) ((DeclaredType) field.asType()).asElement()).getEnclosedElements()) {
