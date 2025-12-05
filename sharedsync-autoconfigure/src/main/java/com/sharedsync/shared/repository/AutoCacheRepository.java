@@ -696,7 +696,63 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     private Method findLoadMethod(Object repository, ID parentId) throws NoSuchMethodException {
-        return repository.getClass().getMethod(loadMethodName, parentId.getClass());
+        Class<?> repoClass = repository.getClass();
+        Class<?> expectedParam = parentId != null ? parentId.getClass() : Object.class;
+
+        // 1) try exact match
+        try {
+            return repoClass.getMethod(loadMethodName, expectedParam);
+        } catch (NoSuchMethodException ignored) {
+        }
+
+        // helper to check primitive/wrapper compatibility
+        java.util.function.BiPredicate<Class<?>, Class<?>> compatible = (expected, actual) -> {
+            if (actual.isAssignableFrom(expected)) return true;
+            // wrapper <-> primitive
+            if (expected == Long.class && actual == long.class) return true;
+            if (expected == Integer.class && actual == int.class) return true;
+            if (expected == Short.class && actual == short.class) return true;
+            if (expected == Byte.class && actual == byte.class) return true;
+            if (expected == Double.class && actual == double.class) return true;
+            if (expected == Float.class && actual == float.class) return true;
+            if (expected == Character.class && actual == char.class) return true;
+            if (expected == Boolean.class && actual == boolean.class) return true;
+            // also allow the reverse (primitive method parameter vs wrapper expected)
+            if (actual == Long.class && expected == long.class) return true;
+            if (actual == Integer.class && expected == int.class) return true;
+            if (actual == Short.class && expected == short.class) return true;
+            if (actual == Byte.class && expected == byte.class) return true;
+            if (actual == Double.class && expected == double.class) return true;
+            if (actual == Float.class && expected == float.class) return true;
+            if (actual == Character.class && expected == char.class) return true;
+            if (actual == Boolean.class && expected == boolean.class) return true;
+            return false;
+        };
+
+        // 2) search public methods on the proxy/impl class
+        for (Method m : repoClass.getMethods()) {
+            if (!m.getName().equals(loadMethodName)) continue;
+            if (m.getParameterCount() != 1) continue;
+            Class<?> actualParam = m.getParameterTypes()[0];
+            if (compatible.test(expectedParam, actualParam)) {
+                return m;
+            }
+        }
+
+        // 3) search declared methods on implemented interfaces (often repository interfaces)
+        for (Class<?> iface : repoClass.getInterfaces()) {
+            for (Method m : iface.getMethods()) {
+                if (!m.getName().equals(loadMethodName)) continue;
+                if (m.getParameterCount() != 1) continue;
+                Class<?> actualParam = m.getParameterTypes()[0];
+                if (compatible.test(expectedParam, actualParam)) {
+                    return m;
+                }
+            }
+        }
+
+        // Nothing matched - throw informative exception
+        throw new NoSuchMethodException("Load method '" + loadMethodName + "' with compatible parameter not found on repository " + repoClass.getName());
     }
 
     private Method resolveFindByIdMethod(Object repository) throws NoSuchMethodException {
