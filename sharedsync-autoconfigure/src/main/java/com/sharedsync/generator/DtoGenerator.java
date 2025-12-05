@@ -2,7 +2,6 @@ package com.sharedsync.generator;
 
 import java.io.IOException;
 import java.io.Writer;
-
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -246,12 +245,26 @@ public class DtoGenerator {
                     .findFirst().orElse(null);
 
             if (match != null) {
-                sb.append("                ");
-                sb.append(var).append(".get")
-                        .append(Generator.capitalizeFirst(field.getName())).append("()")
-                        .append(".get")
-                        .append(Generator.capitalizeFirst(match.getEntityIdName())).append("(),\n");
-                continue;
+                // ManyToOne -> single id
+                if (field.isManyToOne()) {
+                    sb.append("                ");
+                    sb.append(var).append(".get")
+                            .append(Generator.capitalizeFirst(field.getName())).append("()")
+                            .append(".get")
+                            .append(Generator.capitalizeFirst(match.getEntityIdName())).append("(),\n");
+                    continue;
+                }
+
+                // OneToMany -> map collection to list of ids (e.g. user.getUserBooks().stream().map(UserBook::getId).toList())
+                if (field.isOneToMany()) {
+                    String elemSimple = Generator.removePath(match.getEntityPath());
+                    String idMethodRef = elemSimple + "::get" + Generator.capitalizeFirst(match.getEntityIdName());
+                    sb.append("                ");
+                    sb.append(var).append(".get").append(Generator.capitalizeFirst(field.getName())).append("() == null ? java.util.List.of() : ")
+                            .append(var).append(".get").append(Generator.capitalizeFirst(field.getName())).append("().stream().map(")
+                            .append(idMethodRef).append(").toList(),\n");
+                    continue;
+                }
             }
 
                 boolean isBoolean =

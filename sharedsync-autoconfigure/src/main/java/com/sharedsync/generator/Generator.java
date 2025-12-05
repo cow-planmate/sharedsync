@@ -214,7 +214,24 @@ public class Generator extends AbstractProcessor {
                 if (field.getAnnotation(jakarta.persistence.ManyToOne.class) != null ||
                     field.getAnnotation(jakarta.persistence.OneToMany.class) != null) {
                     RelatedEntity related = new RelatedEntity();
-                    related.setEntityPath(field.asType().toString());
+                    if(field.getAnnotation(jakarta.persistence.ManyToOne.class) != null){
+                        related.setEntityPath(field.asType().toString());
+                    }
+                    if(field.getAnnotation(jakarta.persistence.OneToMany.class) != null){
+                        // OneToMany 컬렉션 타입 처리
+                        if (field.asType() instanceof DeclaredType declaredType) {
+                            List<? extends javax.lang.model.type.TypeMirror> typeArgs = declaredType.getTypeArguments();
+                            if (!typeArgs.isEmpty()) {
+                                related.setEntityPath(typeArgs.get(0).toString());
+                            } else {
+                                related.setEntityPath("java.lang.Object"); // 기본값 처리
+                            }
+                        } else {
+                            related.setEntityPath("java.lang.Object"); // 기본값 처리
+                        }
+                    }
+                    
+                
                     String relatedEntityName = removePath(field.asType().toString());
                     if(field.getAnnotation(jakarta.persistence.OneToMany.class) != null){
                         relatedEntityName = relatedEntityName.replace(">", "");
