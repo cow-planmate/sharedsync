@@ -331,6 +331,7 @@ public class Generator extends AbstractProcessor {
     }
 
     public static String removePath(String fullPath) {
+        if(fullPath == null) return null;
         if (fullPath.contains(".")) {
             String[] s = fullPath.split("\\.");
             return s[s.length - 1];
