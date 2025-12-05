@@ -239,13 +239,30 @@ public class Generator extends AbstractProcessor {
                     //
                     System.out.println("EntityName:"+entityName+" Related Entity Detected: " + relatedEntityName);
 
-                    for (Element rf : ((TypeElement) ((DeclaredType) field.asType()).asElement()).getEnclosedElements()) {
-                        if (rf.getAnnotation(jakarta.persistence.Id.class) != null) {
-                            related.setEntityIdType(normalizeType(rf.asType().toString()));
-                            related.setEntityIdName(rf.getSimpleName().toString());
-                            related.setCacheEntityIdName("cache"+relatedEntityName + "Id");
-                            related.setEntityIdOriginalType(rf.asType().toString());
-                            break;
+                    // Determine the correct declared type to inspect for @Id
+                    DeclaredType targetDeclared = null;
+                    if (field.getAnnotation(jakarta.persistence.ManyToOne.class) != null) {
+                        if (field.asType() instanceof DeclaredType dt) {
+                            targetDeclared = dt;
+                        }
+                    } else if (field.getAnnotation(jakarta.persistence.OneToMany.class) != null) {
+                        if (field.asType() instanceof DeclaredType dt) {
+                            List<? extends javax.lang.model.type.TypeMirror> typeArgs = dt.getTypeArguments();
+                            if (!typeArgs.isEmpty() && typeArgs.get(0) instanceof DeclaredType elemDt) {
+                                targetDeclared = elemDt;
+                            }
+                        }
+                    }
+
+                    if (targetDeclared != null) {
+                        for (Element rf : ((TypeElement) targetDeclared.asElement()).getEnclosedElements()) {
+                            if (rf.getAnnotation(jakarta.persistence.Id.class) != null) {
+                                related.setEntityIdType(normalizeType(rf.asType().toString()));
+                                related.setEntityIdName(rf.getSimpleName().toString());
+                                related.setCacheEntityIdName("cache"+relatedEntityName + "Id");
+                                related.setEntityIdOriginalType(rf.asType().toString());
+                                break;
+                            }
                         }
                     }
                     cacheInfo.addRelatedEntity(related);
