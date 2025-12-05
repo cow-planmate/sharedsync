@@ -96,6 +96,12 @@ public class DtoGenerator {
         for (String collectionImport : collectionImports) {
             sb.append("import ").append(collectionImport).append(";\n");
         }
+        // If any OneToMany collections exist, generated DTOs will reference
+        // Persistence.getPersistenceUtil().isLoaded(...) to avoid LazyInitializationException.
+        boolean hasOneToMany = cacheInfo.getEntityFields().stream().anyMatch(FieldInfo::isOneToMany);
+        if (hasOneToMany) {
+            sb.append("import jakarta.persistence.Persistence;\n");
+        }
         return sb.toString();
     }
 
@@ -260,9 +266,11 @@ public class DtoGenerator {
                     String elemSimple = Generator.removePath(match.getEntityPath());
                     String idMethodRef = elemSimple + "::get" + Generator.capitalizeFirst(match.getEntityIdName());
                     sb.append("                ");
-                    sb.append(var).append(".get").append(Generator.capitalizeFirst(field.getName())).append("() == null ? java.util.List.of() : ")
-                            .append(var).append(".get").append(Generator.capitalizeFirst(field.getName())).append("().stream().map(")
-                            .append(idMethodRef).append(").toList(),\n");
+                    sb.append("(!Persistence.getPersistenceUtil().isLoaded(")
+                        .append(var).append(", \"").append(field.getName()).append("\")) ? java.util.List.of() : (")
+                        .append(var).append(".get").append(Generator.capitalizeFirst(field.getName())).append("() == null ? java.util.List.of() : ")
+                        .append(var).append(".get").append(Generator.capitalizeFirst(field.getName())).append("().stream().map(")
+                        .append(idMethodRef).append(").toList()),\n");
                     continue;
                 }
             }
