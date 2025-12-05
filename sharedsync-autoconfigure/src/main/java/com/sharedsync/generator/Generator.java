@@ -37,13 +37,17 @@ public class Generator extends AbstractProcessor {
         private String name;
         private String type;
         private boolean isManyToOne;
+        private boolean isOneToMany;
         private String originalType;
+        private String collectionPath;
 
-        public FieldInfo(String name, String type, boolean isManyToOne) {
+        public FieldInfo(String name, String type, boolean isManyToOne, boolean isOneToMany, String collectionPath) {
             this.name = name;
             this.originalType = type;
             this.type = normalizeType(type);
             this.isManyToOne = isManyToOne;
+            this.isOneToMany = isOneToMany;
+            this.collectionPath = collectionPath;
         }
     }
 
@@ -175,8 +179,27 @@ public class Generator extends AbstractProcessor {
 
                 if (field.getKind().isField()) {
                     boolean isManyToOne = field.getAnnotation(jakarta.persistence.ManyToOne.class) != null;
+                    boolean isOneToMany = field.getAnnotation(jakarta.persistence.OneToMany.class) != null;
+                    String type;
+                    String collectionPath = "";
+                    if (isOneToMany) {
+                        // OneToMany 컬렉션 타입 처리
+                        if (field.asType() instanceof DeclaredType declaredType) {
+                            List<? extends javax.lang.model.type.TypeMirror> typeArgs = declaredType.getTypeArguments();
+                            collectionPath = declaredType.asElement().toString();
+                            if (!typeArgs.isEmpty()) {
+                                type = typeArgs.get(0).toString();
+                            } else {
+                                type = "java.lang.Object"; // 기본값 처리
+                            }
+                        } else {
+                            type = "java.lang.Object"; // 기본값 처리
+                        }
+                    } else {
+                        type = field.asType().toString();
+                    }
                     cacheInfo.addEntityField(
-                            new FieldInfo(field.getSimpleName().toString(), field.asType().toString(), isManyToOne)
+                            new FieldInfo(field.getSimpleName().toString(), type, isManyToOne, isOneToMany, collectionPath)
                     );
                 }
 
@@ -187,11 +210,13 @@ public class Generator extends AbstractProcessor {
                     cacheInfo.setIdOriginalType(field.asType().toString());
                 }
 
-                // ManyToOne 연관 엔티티 처리
-                if (field.getAnnotation(jakarta.persistence.ManyToOne.class) != null) {
+                // ManyToOne 연관 엔티티 처리, OneToMany 연관 엔티티 처리
+                if (field.getAnnotation(jakarta.persistence.ManyToOne.class) != null ||
+                    field.getAnnotation(jakarta.persistence.OneToMany.class) != null) {
                     RelatedEntity related = new RelatedEntity();
                     related.setEntityPath(field.asType().toString());
                     String relatedEntityName = removePath(field.asType().toString());
+                    System.out.println("EntityName:"+entityName+" Related Entity Detected: " + relatedEntityName);
 
                     for (Element rf : ((TypeElement) ((DeclaredType) field.asType()).asElement()).getEnclosedElements()) {
                         if (rf.getAnnotation(jakarta.persistence.Id.class) != null) {

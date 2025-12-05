@@ -2,7 +2,10 @@ package com.sharedsync.generator;
 
 import java.io.IOException;
 import java.io.Writer;
+
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import javax.annotation.processing.ProcessingEnvironment;
 import javax.tools.JavaFileObject;
@@ -77,11 +80,22 @@ public class DtoGenerator {
         if (cacheInfo.getEntityPath() != null) {
             sb.append("import ").append(cacheInfo.getEntityPath()).append(";\n");
         }
-
+        Set<String> collectionImports = new HashSet<>();
         for (RelatedEntity relatedEntity : cacheInfo.getRelatedEntities()) {
             if (relatedEntity.getEntityPath() != null) {
                 sb.append("import ").append(relatedEntity.getEntityPath()).append(";\n");
             }
+            for(FieldInfo fieldInfo : cacheInfo.getEntityFields()) {
+                if (fieldInfo.isOneToMany() && isSameEntity(fieldInfo, relatedEntity)) {
+                    String collectionType = fieldInfo.getCollectionPath();
+                    if (collectionType != null && !collectionType.isEmpty()) {
+                        collectionImports.add(collectionType);
+                    }
+                }
+            }
+        }
+        for (String collectionImport : collectionImports) {
+            sb.append("import ").append(collectionImport).append(";\n");
         }
         return sb.toString();
     }
@@ -167,7 +181,7 @@ public class DtoGenerator {
                     .findFirst()
                     .orElse(null);
 
-            if (matched != null) {
+            if (matched != null && fieldInfo.isManyToOne()) {
                 String fkFieldName = matched.getCacheEntityIdName();
                 String fkFieldType = Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType());
 
@@ -177,7 +191,20 @@ public class DtoGenerator {
                         .append(fkFieldName)
                         .append(";\n");
 
-            } else {
+            }
+            else if(matched != null && fieldInfo.isOneToMany()){
+                String collectionType = fieldInfo.getCollectionPath().split("\\.")[fieldInfo.getCollectionPath().split("\\.").length -1];
+                String fkFieldNames = matched.getCacheEntityIdName()+"s";
+                String fkFieldType = collectionType + "<" + Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType()) + ">";
+
+                fields.append("    private ")
+                    .append(fkFieldType)
+                        .append(" ")
+                        .append(fkFieldNames)
+                        .append(";\n");
+
+            }
+            else {
                 String dtoFieldType = Generator.denormalizeType(fieldInfo.getType(), fieldInfo.getOriginalType());
                 fields.append("    private ")
                     .append(dtoFieldType)
@@ -267,12 +294,25 @@ public class DtoGenerator {
 
         List<FieldInfo> fields = cacheInfo.getEntityFields();
         boolean first = true;
-
         for (FieldInfo field : fields) {
+            
             if (field.isManyToOne()) {
-                if (!first) sb.append(", ");
+                if (!first) {
+                sb.append(", ");
+                } else {
+                    first = false;
+                }
                 sb.append(Generator.removePath(field.getType())).append(" ").append(field.getName());
-                first = false;
+            }
+            if(field.isOneToMany()){
+                if (!first) {
+                sb.append(", ");
+                } else {
+                    first = false;
+                }
+                String colletionType = field.getCollectionPath().split("\\.")[field.getCollectionPath().split("\\.").length -1];
+                sb.append(colletionType).append("<");
+                sb.append(Generator.removePath(field.getType())).append(">").append(" ").append(field.getName());
             }
         }
 
@@ -292,7 +332,7 @@ public class DtoGenerator {
                 continue;
             }
 
-            if (field.isManyToOne()) {
+            if (field.isManyToOne()|| field.isOneToMany()) {
                 sb.append("                .")
                         .append(field.getName()).append("(")
                         .append(field.getName()).append(")\n");
