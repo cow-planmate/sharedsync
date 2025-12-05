@@ -2,13 +2,13 @@ package com.sharedsync.shared.auth;
 
 import java.util.Map;
 
-import com.sharedsync.shared.properties.SharedSyncAuthProperties;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
 
+import com.sharedsync.shared.properties.SharedSyncAuthProperties;
 
 import lombok.RequiredArgsConstructor;
 
@@ -57,6 +57,10 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
         String auth = headers.getFirst("Authorization");
         if (auth != null && auth.startsWith("Bearer ")) {
             return auth.substring(7).trim();
+        }
+        String query = request.getURI().getQuery();
+        if(query != null && query.startsWith("token=")) {
+            return query.substring(6).trim();
         }
         return null;
     }
