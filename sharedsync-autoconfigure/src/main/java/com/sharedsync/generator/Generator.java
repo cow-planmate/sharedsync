@@ -216,6 +216,9 @@ public class Generator extends AbstractProcessor {
                     RelatedEntity related = new RelatedEntity();
                     related.setEntityPath(field.asType().toString());
                     String relatedEntityName = removePath(field.asType().toString());
+                    if(field.getAnnotation(jakarta.persistence.OneToMany.class) != null){
+                        relatedEntityName = relatedEntityName.replace(">", "");
+                    }
                     //
                     System.out.println("EntityName:"+entityName+" Related Entity Detected: " + relatedEntityName);
 

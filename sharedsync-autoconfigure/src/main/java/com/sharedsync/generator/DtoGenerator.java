@@ -297,19 +297,19 @@ public class DtoGenerator {
         for (FieldInfo field : fields) {
             
             if (field.isManyToOne()) {
-                // if (!first) {
-                // sb.append(", ");
-                // } else {
-                //     first = false;
-                // }
+                if (!first) {
+                sb.append(", ");
+                } else {
+                    first = false;
+                }
                 sb.append(Generator.removePath(field.getType())).append(" ").append(field.getName());
             }
             if(field.isOneToMany()){
-                // if (!first) {
-                // sb.append(", ");
-                // } else {
-                //     first = false;
-                // }
+                if (!first) {
+                sb.append(", ");
+                } else {
+                    first = false;
+                }
                 String colletionType = field.getCollectionPath().split("\\.")[field.getCollectionPath().split("\\.").length -1];
                 sb.append(colletionType).append("<");
                 sb.append(Generator.removePath(field.getType())).append(">").append(" ").append(field.getName());
