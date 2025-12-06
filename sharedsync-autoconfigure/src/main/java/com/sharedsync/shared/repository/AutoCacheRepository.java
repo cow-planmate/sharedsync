@@ -705,63 +705,18 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 return null;
             }
 
-            // 1차 시도: DTO에서 같은 이름의 필드 찾기
+            // DTO에서 같은 이름의 필드 찾기
             Field dtoIdField = findFieldInHierarchy(dtoClass, idFieldName);
             if (dtoIdField != null) {
                 dtoIdField.setAccessible(true);
                 Object idValue = dtoIdField.get(dto);
-                if (idValue != null) {
-                    return idValue;
-                }
-            }
-
-            // 2차 시도: DTO에서 @ParentId(entityClass)가 붙은 필드 또는 @CacheId가 붙은 필드 찾기
-            for (Field field : getAllFieldsInHierarchy(dtoClass)) {
-                field.setAccessible(true);
-                
-                // @ParentId 어노테이션 확인 - 엔티티 클래스와 일치하는지
-                ParentId parentIdAnnotation = field.getAnnotation(ParentId.class);
-                if (parentIdAnnotation != null && parentIdAnnotation.value() == entityClass) {
-                    Object idValue = field.get(dto);
-                    return idValue;
-                }
-                
-                // @CacheId 어노테이션 확인 - 해당 엔티티의 ID인 경우
-                CacheId cacheIdAnnotation = field.getAnnotation(CacheId.class);
-                if (cacheIdAnnotation != null) {
-                    Object idValue = field.get(dto);
-                    return idValue;
-                }
-            }
-
-            // 3차 시도: 필드명 패턴 매칭 (cache + EntityClassName + Id)
-            String entitySimpleName = entityClass.getSimpleName();
-            String patternFieldName = "cache" + entitySimpleName + "Id";
-            Field patternField = findFieldInHierarchy(dtoClass, patternFieldName);
-            if (patternField != null) {
-                patternField.setAccessible(true);
-                return patternField.get(dto);
+                return idValue;
             }
 
             return null;
         } catch (IllegalAccessException e) {
             throw new RuntimeException("관련 ID 추출 실패: " + repoName, e);
         }
-    }
-
-    /**
-     * 클래스 계층에서 모든 필드 가져오기
-     */
-    private List<Field> getAllFieldsInHierarchy(Class<?> clazz) {
-        List<Field> fields = new ArrayList<>();
-        Class<?> current = clazz;
-        while (current != null && current != Object.class) {
-            for (Field field : current.getDeclaredFields()) {
-                fields.add(field);
-            }
-            current = current.getSuperclass();
-        }
-        return fields;
     }
 
     /**
