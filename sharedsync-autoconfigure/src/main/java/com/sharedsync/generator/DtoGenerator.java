@@ -85,7 +85,7 @@ public class DtoGenerator {
                 sb.append("import ").append(relatedEntity.getEntityPath()).append(";\n");
             }
             for(FieldInfo fieldInfo : cacheInfo.getEntityFields()) {
-                if (fieldInfo.isOneToMany() && isSameEntity(fieldInfo, relatedEntity)) {
+                if ((fieldInfo.isOneToMany() || fieldInfo.isManyToMany()) && isSameEntity(fieldInfo, relatedEntity)) {
                     String collectionType = fieldInfo.getCollectionPath();
                     if (collectionType != null && !collectionType.isEmpty()) {
                         collectionImports.add(collectionType);
@@ -96,10 +96,11 @@ public class DtoGenerator {
         for (String collectionImport : collectionImports) {
             sb.append("import ").append(collectionImport).append(";\n");
         }
-        // If any OneToMany collections exist, generated DTOs will reference
+        // If any OneToMany/ManyToMany collections exist, generated DTOs will reference
         // Persistence.getPersistenceUtil().isLoaded(...) to avoid LazyInitializationException.
-        boolean hasOneToMany = cacheInfo.getEntityFields().stream().anyMatch(FieldInfo::isOneToMany);
-        if (hasOneToMany) {
+        boolean hasCollectionRelation = cacheInfo.getEntityFields().stream()
+                .anyMatch(f -> f.isOneToMany() || f.isManyToMany());
+        if (hasCollectionRelation) {
             sb.append("import jakarta.persistence.Persistence;\n");
         }
         return sb.toString();
@@ -197,7 +198,7 @@ public class DtoGenerator {
                         .append(";\n");
 
             }
-            else if(matched != null && fieldInfo.isOneToMany()){
+            else if(matched != null && (fieldInfo.isOneToMany() || fieldInfo.isManyToMany())){
                 String collectionType = fieldInfo.getCollectionPath().split("\\.")[fieldInfo.getCollectionPath().split("\\.").length -1];
                 String fkFieldNames = matched.getCacheEntityIdName()+"s";
                 String fkFieldType = collectionType + "<" + Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType()) + ">";
@@ -261,8 +262,8 @@ public class DtoGenerator {
                     continue;
                 }
 
-                // OneToMany -> map collection to list of ids (e.g. user.getUserBooks().stream().map(UserBook::getId).toList())
-                if (field.isOneToMany()) {
+                // OneToMany/ManyToMany -> map collection to list of ids (e.g. user.getUserBooks().stream().map(UserBook::getId).toList())
+                if (field.isOneToMany() || field.isManyToMany()) {
                     String elemSimple = Generator.removePath(match.getEntityPath());
                     String idMethodRef = elemSimple + "::get" + Generator.capitalizeFirst(match.getEntityIdName());
                     sb.append("                ");
@@ -325,7 +326,7 @@ public class DtoGenerator {
                 }
                 sb.append(Generator.removePath(field.getType())).append(" ").append(field.getName());
             }
-            if(field.isOneToMany()){
+            if(field.isOneToMany() || field.isManyToMany()){
                 if (!first) {
                 sb.append(", ");
                 } else {
@@ -353,7 +354,7 @@ public class DtoGenerator {
                 continue;
             }
 
-            if (field.isManyToOne()|| field.isOneToMany()) {
+            if (field.isManyToOne() || field.isOneToMany() || field.isManyToMany()) {
                 sb.append("                .")
                         .append(field.getName()).append("(")
                         .append(field.getName()).append(")\n");
