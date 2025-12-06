@@ -29,6 +29,14 @@ import com.sharedsync.shared.annotation.EntityConverter;
 import com.sharedsync.shared.annotation.ParentId;
 import com.sharedsync.shared.dto.CacheDto;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Path;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+
 /**
  * 완전 자동화된 캐시 리포지토리
  * DTO에 어노테이션만 추가하면 모든 CRUD 및 DB 동기화 기능이 자동으로 구현됩니다.
@@ -41,6 +49,9 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     @Autowired
     private ApplicationContext applicationContext;
+    
+    @PersistenceContext
+    private EntityManager entityManager;
 
     private final Class<DTO> dtoClass;
     private final String cacheKeyPrefix;
@@ -50,6 +61,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     private final Method entityConverterMethod;
     private final Field entityIdField;
     private final Class<ID> idClass;
+    private final String parentEntityFieldName; // Entity에서 parent를 참조하는 필드명
     private final String redisTemplateBeanName;
     private final String repositoryBeanName;
     private final String loadMethodName;
@@ -147,6 +159,46 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 .filter(field -> !Modifier.isStatic(field.getModifiers()))
                 .peek(field -> field.setAccessible(true))
                 .collect(Collectors.collectingAndThen(Collectors.toList(), Collections::unmodifiableList));
+        
+        // Entity에서 parent를 참조하는 필드명 찾기 (Criteria API용)
+        this.parentEntityFieldName = findParentEntityFieldName();
+    }
+    
+    /**
+     * Entity 클래스에서 parentEntityClass를 참조하는 @ManyToOne 필드명을 찾습니다.
+     * 예: Memo 엔티티의 userShelfBook 필드 → "userShelfBook"
+     */
+    private String findParentEntityFieldName() {
+        if (parentEntityClass == null) {
+            return null;
+        }
+        
+        Class<T> entityClass = getEntityClass();
+        for (Field field : entityClass.getDeclaredFields()) {
+            // @ManyToOne 관계이고, 타입이 parentEntityClass와 일치하는지 확인
+            if (field.isAnnotationPresent(jakarta.persistence.ManyToOne.class)) {
+                if (field.getType().equals(parentEntityClass)) {
+                    return field.getName();
+                }
+            }
+        }
+        
+        // @ManyToOne이 없으면 타입으로만 매칭 시도
+        for (Field field : entityClass.getDeclaredFields()) {
+            if (field.getType().equals(parentEntityClass)) {
+                return field.getName();
+            }
+        }
+        
+        // DTO의 parentIdField 이름에서 추론 (예: userShelfBookId → userShelfBook)
+        if (parentIdField != null) {
+            String fieldName = parentIdField.getName();
+            if (fieldName.endsWith("Id")) {
+                return fieldName.substring(0, fieldName.length() - 2);
+            }
+        }
+        
+        return null;
     }
 
     // ==== CacheRepository 인터페이스 기본 CRUD 구현 ====
@@ -411,13 +463,75 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     @SuppressWarnings("unchecked")
     private List<T> loadEntitiesByParentId(ID parentId) {
         parentId = changeType(parentId);
-        try {
-            Object repository = applicationContext.getBean(repositoryBeanName);
-            Method loadMethod = findLoadMethod(repository, parentId);
-            return (List<T>) loadMethod.invoke(repository, parentId);
-        } catch (Exception e) {
-            throw new RuntimeException("데이터베이스 로딩 실패: " + parentId, e);
+        
+        // Criteria API로 직접 쿼리 (Repository 필요 없음!)
+        if (parentEntityFieldName != null && entityManager != null) {
+            try {
+                return loadEntitiesByCriteria(parentId);
+            } catch (Exception e) {
+                System.err.println("[SharedSync] Criteria API 로딩 실패: " + e.getMessage());
+                e.printStackTrace();
+            }
         }
+        
+        // parentEntityFieldName이 없으면 (루트 엔티티) findAll 사용
+        if (parentEntityFieldName == null && entityManager != null) {
+            try {
+                return loadAllEntitiesByCriteria();
+            } catch (Exception e) {
+                System.err.println("[SharedSync] Criteria API findAll 실패: " + e.getMessage());
+            }
+        }
+        
+        return Collections.emptyList();
+    }
+    
+    /**
+     * JPA Criteria API를 사용하여 parentId로 엔티티 조회
+     * Repository에 메서드가 없어도 동작합니다!
+     */
+    @SuppressWarnings("unchecked")
+    private List<T> loadEntitiesByCriteria(ID parentId) {
+        Class<T> entityClass = getEntityClass();
+        
+        CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+        CriteriaQuery<T> query = (CriteriaQuery<T>) cb.createQuery(entityClass);
+        Root<T> root = (Root<T>) query.from(entityClass);
+        
+        // parent.id = :parentId 조건 생성
+        // 예: SELECT m FROM Memo m WHERE m.userShelfBook.id = :parentId
+        Path<?> parentPath = root.get(parentEntityFieldName);
+        Path<?> parentIdPath = parentPath.get("id");
+        
+        Predicate predicate = cb.equal(parentIdPath, parentId);
+        query.where(predicate);
+        
+        return entityManager.createQuery(query).getResultList();
+    }
+    
+    /**
+     * JPA Criteria API를 사용하여 모든 엔티티 조회 (루트 엔티티용)
+     */
+    @SuppressWarnings("unchecked")
+    private List<T> loadAllEntitiesByCriteria() {
+        Class<T> entityClass = getEntityClass();
+        
+        CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+        CriteriaQuery<T> query = (CriteriaQuery<T>) cb.createQuery(entityClass);
+        query.from(entityClass);
+        
+        return entityManager.createQuery(query).getResultList();
+    }
+    
+    /**
+     * JPA Criteria API를 사용하여 ID로 단일 엔티티 조회
+     */
+    @SuppressWarnings("unchecked")
+    private T loadEntityByIdCriteria(ID id) {
+        Class<T> entityClass = getEntityClass();
+        
+        // EntityManager.find() 사용 - 가장 효율적
+        return entityManager.find(entityClass, id);
     }
 
     @Override
@@ -436,30 +550,18 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         id = changeType(id);
 
         try {
-
-            Object repository = applicationContext.getBean(repositoryBeanName);
-            Method findByIdMethod = resolveFindByIdMethod(repository);
-
-            Object result = findByIdMethod.invoke(repository, id);
-
-            Object entity;
-            if (result instanceof java.util.Optional<?> optional) {
-                if (optional.isEmpty()) {
-                    return null;
-                }
-                entity = optional.get();
-            } else {
-                entity = result;
-            }
-
+            // EntityManager.find() 사용 - Repository 필요 없음!
+            T entity = loadEntityByIdCriteria(id);
+            
             if (entity == null) {
                 return null;
             }
 
-            return convertToDto((T) entity);
+            return convertToDto(entity);
 
         } catch (Exception e) {
-            throw new RuntimeException("ID로 데이터베이스 로딩 실패: " + id, e);
+            System.err.println("[SharedSync] ID로 데이터베이스 로딩 실패: " + id + " - " + e.getMessage());
+            return null;
         }
     }
 
@@ -751,8 +853,73 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             }
         }
 
+        // 4) Fallback: try alternative method name patterns commonly used in Spring Data JPA
+        //    e.g., findByUserShelfBookId -> findByUserShelfBook_Id or findByUserShelfBookUserShelfBookId
+        List<String> alternativeNames = generateAlternativeMethodNames(loadMethodName);
+        for (String altName : alternativeNames) {
+            for (Method m : repoClass.getMethods()) {
+                if (!m.getName().equals(altName)) continue;
+                if (m.getParameterCount() != 1) continue;
+                Class<?> actualParam = m.getParameterTypes()[0];
+                if (compatible.test(expectedParam, actualParam)) {
+                    return m;
+                }
+            }
+            for (Class<?> iface : repoClass.getInterfaces()) {
+                for (Method m : iface.getMethods()) {
+                    if (!m.getName().equals(altName)) continue;
+                    if (m.getParameterCount() != 1) continue;
+                    Class<?> actualParam = m.getParameterTypes()[0];
+                    if (compatible.test(expectedParam, actualParam)) {
+                        return m;
+                    }
+                }
+            }
+        }
+
+        // 5) Last resort: find ANY method that returns List and takes single compatible param
+        for (Method m : repoClass.getMethods()) {
+            if (!m.getName().startsWith("findBy")) continue;
+            if (m.getParameterCount() != 1) continue;
+            Class<?> actualParam = m.getParameterTypes()[0];
+            if (!compatible.test(expectedParam, actualParam)) continue;
+            // check return type is List or Collection
+            if (java.util.List.class.isAssignableFrom(m.getReturnType()) ||
+                java.util.Collection.class.isAssignableFrom(m.getReturnType())) {
+                return m;
+            }
+        }
+
         // Nothing matched - throw informative exception
         throw new NoSuchMethodException("Load method '" + loadMethodName + "' with compatible parameter not found on repository " + repoClass.getName());
+    }
+
+    /**
+     * Generate alternative method name patterns for fallback lookup.
+     * e.g., "findByUserShelfBookId" -> ["findByUserShelfBook_Id", "findByUserShelfBookUserShelfBookId"]
+     */
+    private List<String> generateAlternativeMethodNames(String methodName) {
+        List<String> alternatives = new ArrayList<>();
+        
+        // Pattern: findBy{Entity}Id -> findBy{Entity}_Id (underscore variant)
+        if (methodName.endsWith("Id") && methodName.length() > 8) {
+            String withUnderscore = methodName.substring(0, methodName.length() - 2) + "_Id";
+            alternatives.add(withUnderscore);
+        }
+        
+        // Pattern: findBy{Entity}Id -> findBy{Entity}{Entity}Id (Spring Data nested property)
+        // Extract entity name from findBy{Entity}Id
+        if (methodName.startsWith("findBy") && methodName.endsWith("Id")) {
+            String entityPart = methodName.substring(6, methodName.length() - 2); // e.g., "UserShelfBook"
+            if (!entityPart.isEmpty()) {
+                // findByUserShelfBookUserShelfBookId pattern
+                alternatives.add("findBy" + entityPart + entityPart + "Id");
+                // findByUserShelfBook_UserShelfBookId pattern  
+                alternatives.add("findBy" + entityPart + "_" + entityPart + "Id");
+            }
+        }
+        
+        return alternatives;
     }
 
     private Method resolveFindByIdMethod(Object repository) throws NoSuchMethodException {
@@ -990,7 +1157,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
         if (!entitiesToDelete.isEmpty()) {
             handleChildCleanupBeforeDelete(entitiesToDelete);
-            getJpaRepository().deleteAll(entitiesToDelete);
+            deleteAllEntities(entitiesToDelete);
         }
         return refreshedDtos;
     }
@@ -1034,7 +1201,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
 
         handleChildCleanupBeforeDelete(targets);
-        getJpaRepository().deleteAll(targets);
+        deleteAllEntities(targets);
     }
 
     @SuppressWarnings("unchecked")
@@ -1068,7 +1235,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     @SuppressWarnings("null")
     private DTO saveToDatabase(DTO dto) {
-        JpaRepository<T, ID> repository = getJpaRepository();
         T entity = convertToEntity(dto);
 
         ID previousId = extractEntityId(entity);
@@ -1081,16 +1247,15 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         T entityToSave = entity;
         if (hasPersistentId) {
             ID persistedId = Objects.requireNonNull(previousId);
-            if (repository.existsById(persistedId)) {
-                T origin = repository.findById(persistedId).orElse(null);
-                if (origin != null) {
-                    mergeEntityFields(origin, entity);
-                    entityToSave = origin;
-                }
+            T origin = entityManager.find(getEntityClass(), persistedId);
+            if (origin != null) {
+                mergeEntityFields(origin, entity);
+                entityToSave = origin;
             }
         }
 
-        T savedEntity = repository.save(Objects.requireNonNull(entityToSave));
+        // EntityManager로 저장 (persist 또는 merge)
+        T savedEntity = saveEntity(entityToSave);
 
         DTO updatedDto = convertToDto(savedEntity);
         ID cacheId = extractId(updatedDto);
@@ -1110,6 +1275,31 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             getRedisTemplate().delete(staleKey);
         }
         return updatedDto;
+    }
+    
+    /**
+     * EntityManager를 사용하여 엔티티 저장 (persist 또는 merge)
+     */
+    private T saveEntity(T entity) {
+        ID id = extractEntityId(entity);
+        if (id == null) {
+            // 새 엔티티 - persist
+            entityManager.persist(entity);
+            return entity;
+        } else {
+            // 기존 엔티티 - merge
+            return entityManager.merge(entity);
+        }
+    }
+    
+    /**
+     * EntityManager를 사용하여 여러 엔티티 삭제
+     */
+    private void deleteAllEntities(List<T> entities) {
+        for (T entity : entities) {
+            T managed = entityManager.contains(entity) ? entity : entityManager.merge(entity);
+            entityManager.remove(managed);
+        }
     }
 
     public boolean isParentIdFieldPresent() {
@@ -1259,11 +1449,5 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             throw new RuntimeException("엔티티 ID 설정 실패", e);
         }
     }
-
-    @SuppressWarnings({"unchecked", "null"})
-    private JpaRepository<T, ID> getJpaRepository() {
-        return (JpaRepository<T, ID>) Objects.requireNonNull(applicationContext.getBean(repositoryBeanName));
-    }
-
 
 }
