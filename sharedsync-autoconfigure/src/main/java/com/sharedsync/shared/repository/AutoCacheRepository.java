@@ -257,21 +257,19 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                     dto = updateDtoWithId(dto, (ID) temporaryId);
                     iterator.set(dto); // 리스트 내부 DTO도 갱신
                     id = extractId(dto);
-                    continue;
                 }
-                if(idClass.getSimpleName().equals("Long")){
+                else if(idClass.getSimpleName().equals("Long")){
                     Long temporaryId = Long.valueOf(generateTemporaryId());
                     dto = updateDtoWithId(dto, (ID) temporaryId);
                     iterator.set(dto); // 리스트 내부 DTO도 갱신
                     id = extractId(dto);
-                    continue;
                 }
-                if(idClass.getSimpleName().equals("Integer")){
+                else if(idClass.getSimpleName().equals("Integer")){
                     Integer temporaryId = generateTemporaryId();
                     dto = updateDtoWithId(dto, (ID) temporaryId);
                     iterator.set(dto); // 리스트 내부 DTO도 갱신
                     id = extractId(dto);
-                    continue;
+
                 }
             }
             getRedisTemplate().opsForValue().set(getRedisKey(id), dto);
