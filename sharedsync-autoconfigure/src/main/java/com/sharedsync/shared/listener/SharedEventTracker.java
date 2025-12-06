@@ -15,12 +15,13 @@ import lombok.RequiredArgsConstructor;
 public class SharedEventTracker {
 
     private static final String USER_ID = "userId";
+    private static final String SIMP_SESSION_ID = "simpSessionId";
     private final PresenceSessionManager presenceSessionManager;
 
     @EventListener
     public void handleSubscribeEvent(SessionSubscribeEvent event) {
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
-        String sessionId = accessor.getSessionId();
+        String sessionId = extractSessionId(accessor);
         String userId = extractUserId(accessor);
         String roomId = parseRoomId(accessor.getDestination());
 
@@ -33,10 +34,24 @@ public class SharedEventTracker {
     public void handleDisconnectEvent(SessionDisconnectEvent event) {
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
         String userId = extractUserId(accessor);
-        String sessionId = accessor.getSessionId();
+        String sessionId = extractSessionId(accessor);
         if (userId != null) {
             presenceSessionManager.handleDisconnect(userId, sessionId);
         }
+    }
+
+    /**
+     * SockJS 사용 시 Subscribe와 Disconnect에서 sessionId가 다를 수 있음.
+     * sessionAttributes에 저장된 simpSessionId를 우선 사용하여 일관성 보장.
+     */
+    private String extractSessionId(StompHeaderAccessor accessor) {
+        if (accessor.getSessionAttributes() != null) {
+            Object storedSessionId = accessor.getSessionAttributes().get(SIMP_SESSION_ID);
+            if (storedSessionId != null) {
+                return String.valueOf(storedSessionId);
+            }
+        }
+        return accessor.getSessionId();
     }
 
     private String extractUserId(StompHeaderAccessor accessor) {
