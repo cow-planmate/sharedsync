@@ -249,6 +249,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         for (ListIterator<DTO> iterator = dtos.listIterator(); iterator.hasNext();) {
             DTO dto = iterator.next();
             ID id = extractId(dto);
+            changeType(id);
 
             if (id == null) {
                 Integer temporaryId = generateTemporaryId();
