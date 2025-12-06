@@ -249,15 +249,31 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         for (ListIterator<DTO> iterator = dtos.listIterator(); iterator.hasNext();) {
             DTO dto = iterator.next();
             ID id = extractId(dto);
-            changeType(id);
+            id = changeType(id);
 
             if (id == null) {
-                Integer temporaryId = generateTemporaryId();
-                dto = updateDtoWithId(dto, (ID) temporaryId);
-                iterator.set(dto); // 리스트 내부 DTO도 갱신
-                id = extractId(dto);
+                if(idClass.getSimpleName().equals("String")){
+                    String temporaryId = java.util.UUID.randomUUID().toString();
+                    dto = updateDtoWithId(dto, (ID) temporaryId);
+                    iterator.set(dto); // 리스트 내부 DTO도 갱신
+                    id = extractId(dto);
+                    continue;
+                }
+                if(idClass.getSimpleName().equals("Long")){
+                    Long temporaryId = Long.valueOf(generateTemporaryId());
+                    dto = updateDtoWithId(dto, (ID) temporaryId);
+                    iterator.set(dto); // 리스트 내부 DTO도 갱신
+                    id = extractId(dto);
+                    continue;
+                }
+                if(idClass.getSimpleName().equals("Integer")){
+                    Integer temporaryId = generateTemporaryId();
+                    dto = updateDtoWithId(dto, (ID) temporaryId);
+                    iterator.set(dto); // 리스트 내부 DTO도 갱신
+                    id = extractId(dto);
+                    continue;
+                }
             }
-
             getRedisTemplate().opsForValue().set(getRedisKey(id), dto);
         }
         return dtos;
@@ -566,6 +582,9 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     private ID changeType(ID id){
+        if(id == null){
+            return null;
+        }
         if(idClass.isInstance(id)){
             return id;
         }
