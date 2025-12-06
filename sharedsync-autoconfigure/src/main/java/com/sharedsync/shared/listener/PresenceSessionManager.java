@@ -26,7 +26,7 @@ public class PresenceSessionManager {
     private final PresenceRootResolver presenceRootResolver;
 
     /**
-     * STOMP 구독 시 (입장)
+     * 연결 시 (입장)
      */
     public void handleConnect(String rootId, String userId, String sessionId) {
         if (!presenceStorage.hasTracker(rootId)) {
