@@ -339,35 +339,32 @@ public class DtoGenerator {
         }
 
         sb.append(") {\n");
-        sb.append("        return ").append(cacheInfo.getEntityName()).append(".builder()\n");
+        sb.append("        return new ").append(cacheInfo.getEntityName()).append("(\n");
 
         for (FieldInfo field : fields) {
 
             if (field.getName().equals(idName)) {
-                sb.append("                .").append(field.getName()).append("(this.");
+                sb.append("                ");
                 if(field.getName().equals(cacheInfo.getIdName())){
-                    sb.append(cacheInfo.getCacheEntityIdName()).append(")\n");
+                    sb.append("this.").append(cacheInfo.getCacheEntityIdName()).append(",\n");
                 }
                 else{
-                    sb.append(field.getName()).append(")\n");
+                    sb.append("this.").append(field.getName()).append(",\n");
                 }
                 continue;
             }
 
             if (field.isManyToOne() || field.isOneToMany() || field.isManyToMany()) {
-                sb.append("                .")
-                        .append(field.getName()).append("(")
-                        .append(field.getName()).append(")\n");
+                // parameter passed into toEntity(...) for relations
+                sb.append("                ").append(field.getName()).append(",\n");
             } else {
-                sb.append("                .")
-                        .append(field.getName())
-                        .append("(this.")
-                        .append(field.getName())
-                        .append(")\n");
+                sb.append("                this.").append(field.getName()).append(",\n");
             }
         }
 
-        sb.append("                .build();\n");
+        // remove trailing comma and newline
+        if (sb.length() >= 2) sb.setLength(sb.length() - 2);
+        sb.append("\n        );\n");
         sb.append("    }\n");
 
         return sb.toString();
