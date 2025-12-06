@@ -7,6 +7,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.sharedsync.shared.repository.AutoCacheRepository;
 
@@ -17,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 public class CacheSyncService {
     private final List<AutoCacheRepository<?, ?, ?>> cacheRepositories;
 
+    @Transactional
     public void syncToDatabase(String rootId) {
         AutoCacheRepository<?, ?, ?> rootRepository = cacheRepositories.stream()
                 .filter(repo -> !repo.isParentIdFieldPresent())
