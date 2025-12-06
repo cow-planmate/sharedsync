@@ -661,29 +661,98 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     private Object[] buildEntityConverterParameters(DTO dto) throws Exception {
         Object[] params = new Object[entityConverterRepositories.length];
+        Class<?>[] parameterTypes = entityConverterMethod.getParameterTypes();
+        Type[] genericParameterTypes = entityConverterMethod.getGenericParameterTypes();
 
         for (int i = 0; i < entityConverterRepositories.length; i++) {
             String repoName = entityConverterRepositories[i];
             Object repository = applicationContext.getBean(repoName);
+            Class<?> paramType = parameterTypes[i];
+            Type genericType = genericParameterTypes[i];
 
-            // DTO에서 적절한 ID를 추출
-            Object relatedId = extractRelatedId(dto, i);
-
-            // ID가 null이면 null 반환
-            if (relatedId == null) {
-                params[i] = null;
+            // List 타입인 경우 특별 처리
+            if (List.class.isAssignableFrom(paramType)) {
+                // List<Tag>와 같은 경우
+                Class<?> elementType = getListElementType(genericType);
+                if (elementType != null) {
+                    // DTO에서 ID 리스트 추출
+                    List<?> idList = extractRelatedIdList(dto, elementType);
+                    if (idList != null && !idList.isEmpty()) {
+                        // 각 ID에 대해 엔티티 조회
+                        List<Object> entities = new ArrayList<>();
+                        for (Object id : idList) {
+                            try {
+                                Method getReferenceMethod = repository.getClass().getMethod("getReferenceById", Object.class);
+                                Object entityRef = getReferenceMethod.invoke(repository, id);
+                                entities.add(entityRef);
+                            } catch (Exception e) {
+                                // 개별 엔티티 조회 실패 시 건너뛰기
+                            }
+                        }
+                        params[i] = entities;
+                    } else {
+                        params[i] = new ArrayList<>();
+                    }
+                } else {
+                    params[i] = new ArrayList<>();
+                }
             } else {
-                try {
-                    Method getReferenceMethod = repository.getClass().getMethod("getReferenceById", Object.class);
-                    Object entityRef = getReferenceMethod.invoke(repository, relatedId);
-                    params[i] = entityRef;
-                } catch (Exception e) {
+                // 단일 엔티티인 경우 기존 로직
+                Object relatedId = extractRelatedId(dto, i);
+
+                if (relatedId == null) {
                     params[i] = null;
+                } else {
+                    try {
+                        Method getReferenceMethod = repository.getClass().getMethod("getReferenceById", Object.class);
+                        Object entityRef = getReferenceMethod.invoke(repository, relatedId);
+                        params[i] = entityRef;
+                    } catch (Exception e) {
+                        params[i] = null;
+                    }
                 }
             }
         }
 
         return params;
+    }
+
+    /**
+     * 제네릭 타입에서 List의 요소 타입 추출
+     */
+    private Class<?> getListElementType(Type genericType) {
+        if (genericType instanceof ParameterizedType) {
+            ParameterizedType parameterizedType = (ParameterizedType) genericType;
+            Type[] typeArguments = parameterizedType.getActualTypeArguments();
+            if (typeArguments.length > 0 && typeArguments[0] instanceof Class) {
+                return (Class<?>) typeArguments[0];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * DTO에서 관련 ID 리스트 추출 (List<Tag> 등을 위해)
+     */
+    @SuppressWarnings("unchecked")
+    private List<?> extractRelatedIdList(DTO dto, Class<?> elementType) {
+        String elementSimpleName = elementType.getSimpleName();
+        // 필드명 패턴: cache + EntityClassName + Ids (복수형)
+        String patternFieldName = "cache" + elementSimpleName + "Ids";
+        
+        try {
+            Field patternField = findFieldInHierarchy(dtoClass, patternFieldName);
+            if (patternField != null) {
+                patternField.setAccessible(true);
+                Object value = patternField.get(dto);
+                if (value instanceof List) {
+                    return (List<?>) value;
+                }
+            }
+        } catch (IllegalAccessException e) {
+            // 무시
+        }
+        return null;
     }
 
     private Object extractRelatedId(DTO dto, int parameterIndex) {
@@ -715,20 +784,13 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 }
             }
 
-            // 2차 시도: DTO에서 @ParentId(entityClass)가 붙은 필드 또는 @CacheId가 붙은 필드 찾기
+            // 2차 시도: DTO에서 @ParentId(entityClass)가 붙은 필드 찾기
             for (Field field : getAllFieldsInHierarchy(dtoClass)) {
                 field.setAccessible(true);
                 
                 // @ParentId 어노테이션 확인 - 엔티티 클래스와 일치하는지
                 ParentId parentIdAnnotation = field.getAnnotation(ParentId.class);
                 if (parentIdAnnotation != null && parentIdAnnotation.value() == entityClass) {
-                    Object idValue = field.get(dto);
-                    return idValue;
-                }
-                
-                // @CacheId 어노테이션 확인 - 해당 엔티티의 ID인 경우
-                CacheId cacheIdAnnotation = field.getAnnotation(CacheId.class);
-                if (cacheIdAnnotation != null) {
                     Object idValue = field.get(dto);
                     return idValue;
                 }
