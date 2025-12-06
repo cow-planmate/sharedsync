@@ -645,13 +645,24 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             return Collections.emptyList();
         }
 
-        // parentId로 필터링
+        // parentId로 필터링 (널 안전성 및 타입-유연 비교 적용)
         return allDtos.stream()
                 .filter(dto -> dto != null)
                 .filter(dto -> {
                     try {
                         Object dtoParentId = parentIdField.get(dto);
-                        return parentId.equals(dtoParentId);
+                        // dto에 부모 ID가 비어있으면 후보에서 제외
+                        if (dtoParentId == null || parentId == null) {
+                            return false;
+                        }
+
+                        // 동일 타입이면 Objects.equals 사용
+                        if (parentId.getClass().isInstance(dtoParentId) || dtoParentId.getClass().isInstance(parentId)) {
+                            return Objects.equals(parentId, dtoParentId);
+                        }
+
+                        // 타입이 다르면 문자열로 비교 (예: "1" vs 1)
+                        return parentId.toString().equals(dtoParentId.toString());
                     } catch (IllegalAccessException e) {
                         return false;
                     }
@@ -784,13 +795,20 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 }
             }
 
-            // 2차 시도: DTO에서 @ParentId(entityClass)가 붙은 필드 찾기
+            // 2차 시도: DTO에서 @ParentId(entityClass)가 붙은 필드 또는 @CacheId가 붙은 필드 찾기
             for (Field field : getAllFieldsInHierarchy(dtoClass)) {
                 field.setAccessible(true);
                 
                 // @ParentId 어노테이션 확인 - 엔티티 클래스와 일치하는지
                 ParentId parentIdAnnotation = field.getAnnotation(ParentId.class);
                 if (parentIdAnnotation != null && parentIdAnnotation.value() == entityClass) {
+                    Object idValue = field.get(dto);
+                    return idValue;
+                }
+                
+                // @CacheId 어노테이션 확인 - 해당 엔티티의 ID인 경우
+                CacheId cacheIdAnnotation = field.getAnnotation(CacheId.class);
+                if (cacheIdAnnotation != null) {
                     Object idValue = field.get(dto);
                     return idValue;
                 }
