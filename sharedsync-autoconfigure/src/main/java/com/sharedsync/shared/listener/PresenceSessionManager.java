@@ -28,7 +28,7 @@ public class PresenceSessionManager {
     /**
      * STOMP 구독 시 (입장)
      */
-    public void handleSubscribe(String rootId, String userId, String sessionId) {
+    public void handleConnect(String rootId, String userId, String sessionId) {
         if (!presenceStorage.hasTracker(rootId)) {
             cacheInitializer.initializeHierarchy(rootId);
         }
