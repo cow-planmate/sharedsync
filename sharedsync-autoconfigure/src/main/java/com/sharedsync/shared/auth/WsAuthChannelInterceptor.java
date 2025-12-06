@@ -3,6 +3,7 @@ package com.sharedsync.shared.auth;
 import java.security.Principal;
 import java.util.List;
 
+import com.sharedsync.shared.properties.SharedSyncAuthProperties;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
@@ -11,7 +12,6 @@ import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Component;
 
-import com.sharedsync.shared.properties.SharedSyncAuthProperties;
 
 import lombok.RequiredArgsConstructor;
 
@@ -56,12 +56,6 @@ public class WsAuthChannelInterceptor implements ChannelInterceptor {
 
         int userId = Integer.parseInt(tokenResolver.extractPrincipalId(token));
         acc.setUser(new StompPrincipal(userId));
-        
-        // SockJS sessionId 불일치 문제 해결: simpSessionId를 sessionAttributes에 저장
-        String simpSessionId = acc.getSessionId();
-        if (simpSessionId != null && acc.getSessionAttributes() != null) {
-            acc.getSessionAttributes().put("simpSessionId", simpSessionId);
-        }
     }
 
     private void handleSubscribe(StompHeaderAccessor acc) {
