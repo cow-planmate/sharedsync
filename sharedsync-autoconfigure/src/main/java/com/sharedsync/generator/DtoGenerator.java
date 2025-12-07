@@ -26,24 +26,20 @@ public class DtoGenerator {
     public static boolean process(CacheInformation cacheInfo, ProcessingEnvironment processingEnv) {
 
         String source =
-                "package " + cacheInfo.getDtoPath() + ";\n"
-                        + "import com.sharedsync.shared.annotation.*;\n"
-                        + "import lombok.*;\n"
-                        + "import com.sharedsync.shared.dto.CacheDto;\n"
-                        + writeEntityPath(cacheInfo)
-                        + "@Cache\n"
-                        + "@AllArgsConstructor\n"
-                        + "@NoArgsConstructor\n"
-                        + "@Getter\n"
-                        + "@Setter\n"
-                        + writeAutoDatabaseLoader(cacheInfo)
-                        + writeAutoEntityConverter(cacheInfo)
-                        + "public class " + cacheInfo.getDtoClassName()
-                        + " extends CacheDto<" + cacheInfo.getIdType() + "> {\n\n"
-                        + writeDtoFields(cacheInfo)
-                        + writeFromEntityMethod(cacheInfo)
-                        + writeToEntityMethod(cacheInfo)
-                        + "}";
+            "package " + cacheInfo.getDtoPath() + "\n"
+                + "import com.sharedsync.shared.annotation.*;\n"
+                + "import com.sharedsync.shared.dto.CacheDto;\n"
+                + writeEntityPath(cacheInfo)
+                + "@Cache\n"
+                + writeAutoDatabaseLoader(cacheInfo)
+                + writeAutoEntityConverter(cacheInfo)
+                + "public class " + cacheInfo.getDtoClassName()
+                + " extends CacheDto<" + cacheInfo.getIdType() + "> {\n\n"
+                + writeDtoFields(cacheInfo)
+                + writeConstructors(cacheInfo)
+                + writeFromEntityMethod(cacheInfo)
+                + writeToEntityMethodUsingProcessor(cacheInfo)
+                + "}";
 
         try {
             JavaFileObject file = processingEnv.getFiler().createSourceFile(
@@ -103,6 +99,186 @@ public class DtoGenerator {
         if (hasCollectionRelation) {
             sb.append("import jakarta.persistence.Persistence;\n");
         }
+        return sb.toString();
+    }
+
+    // ==========================================
+    // ToEntity (use processor-generated factory)
+    // ==========================================
+    private static String writeToEntityMethodUsingProcessor(CacheInformation cacheInfo) {
+        StringBuilder sb = new StringBuilder();
+        String idName = cacheInfo.getIdName();
+
+        sb.append("    @EntityConverter\n");
+        sb.append("    public ").append(cacheInfo.getEntityName()).append(" toEntity(");
+
+        List<FieldInfo> fields = cacheInfo.getEntityFields();
+        boolean first = true;
+        for (FieldInfo field : fields) {
+            if (field.isManyToOne()) {
+                if (!first) {
+                    sb.append(", ");
+                } else {
+                    first = false;
+                }
+                sb.append(Generator.removePath(field.getType())).append(" ").append(field.getName());
+            }
+            if (field.isOneToMany() || field.isManyToMany()) {
+                if (!first) {
+                    sb.append(", ");
+                } else {
+                    first = false;
+                }
+                String colletionType = field.getCollectionPath().split("\\.")[field.getCollectionPath().split("\\.").length - 1];
+                sb.append(colletionType).append("<");
+                sb.append(Generator.removePath(field.getType())).append("> ").append(field.getName());
+            }
+        }
+
+        sb.append(") {\n");
+
+        // determine factory qualified name
+        String entityPath = cacheInfo.getEntityPath();
+        String pkg = "";
+        if (entityPath != null && entityPath.contains(".")) {
+            pkg = entityPath.substring(0, entityPath.lastIndexOf('.'));
+        }
+        String factoryQualified = pkg.isEmpty() ? cacheInfo.getEntityName() + "AllArgsConstructor" : pkg + "." + cacheInfo.getEntityName() + "AllArgsConstructor";
+
+        sb.append("        return ").append(factoryQualified).append(".create(\n");
+
+        for (FieldInfo field : fields) {
+
+            if (field.getName().equals(idName)) {
+                sb.append("                ");
+                if (field.getName().equals(cacheInfo.getIdName())) {
+                    sb.append("this.").append(cacheInfo.getCacheEntityIdName()).append(",\n");
+                } else {
+                    sb.append("this.").append(field.getName()).append(",\n");
+                }
+                continue;
+            }
+
+            if (field.isManyToOne() || field.isOneToMany() || field.isManyToMany()) {
+                // parameter passed into toEntity(...) for relations
+                sb.append("                ").append(field.getName()).append(",\n");
+            } else {
+                sb.append("                this.").append(field.getName()).append(",\n");
+            }
+        }
+
+        // remove trailing comma and newline
+        if (sb.length() >= 2) sb.setLength(sb.length() - 2);
+        sb.append("\n        );\n");
+        sb.append("    }\n\n");
+
+        return sb.toString();
+    }
+
+    // ==========================================
+    // Constructors (generate no-arg + all-args for DTO)
+    // ==========================================
+    private static String writeConstructors(CacheInformation cacheInfo) {
+        StringBuilder sb = new StringBuilder();
+
+        // no-arg
+        sb.append("    public ").append(cacheInfo.getDtoClassName()).append("() { }\n\n");
+
+        // build parameter list in same order as fromEntity (id first, then entity fields excluding id)
+        StringBuilder params = new StringBuilder();
+        List<FieldInfo> fields = cacheInfo.getEntityFields();
+        // first param: cache id
+        params.append(cacheInfo.getIdType()).append(" ").append(cacheInfo.getCacheEntityIdName());
+
+        for (FieldInfo fieldInfo : fields) {
+            if (fieldInfo.getName().equals(cacheInfo.getIdName())) continue;
+
+            // ParentId
+            if (cacheInfo.getParentEntityPath() != null
+                    && isSameEntity(fieldInfo,
+                    cacheInfo.getRelatedEntities().stream()
+                            .filter(re -> re.getEntityPath().equals(cacheInfo.getParentEntityPath()))
+                            .findFirst()
+                            .orElse(null))) {
+
+                RelatedEntity parent = cacheInfo.getRelatedEntities().stream()
+                        .filter(re -> re.getEntityPath().equals(cacheInfo.getParentEntityPath()))
+                        .findFirst().orElse(null);
+
+                String parentFieldName = parent.getCacheEntityIdName();
+                String parentFieldType = Generator.denormalizeType(parent.getEntityIdType(), parent.getEntityIdOriginalType());
+
+                params.append(", ").append(parentFieldType).append(" ").append(parentFieldName);
+                continue;
+            }
+
+            RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
+                    .filter(re -> isSameEntity(fieldInfo, re))
+                    .findFirst()
+                    .orElse(null);
+
+            if (matched != null && fieldInfo.isManyToOne()) {
+                String fkFieldName = matched.getCacheEntityIdName();
+                String fkFieldType = Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType());
+                params.append(", ").append(fkFieldType).append(" ").append(fkFieldName);
+
+            } else if (matched != null && (fieldInfo.isOneToMany() || fieldInfo.isManyToMany())){
+                String collectionType = fieldInfo.getCollectionPath().split("\\.")[fieldInfo.getCollectionPath().split("\\.").length -1];
+                String fkFieldNames = matched.getCacheEntityIdName()+"s";
+                String fkFieldType = collectionType + "<" + Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType()) + ">";
+                params.append(", ").append(fkFieldType).append(" ").append(fkFieldNames);
+
+            } else {
+                String dtoFieldType = Generator.denormalizeType(fieldInfo.getType(), fieldInfo.getOriginalType());
+                params.append(", ").append(dtoFieldType).append(" ").append(fieldInfo.getName());
+            }
+        }
+
+        // all-args constructor signature
+        sb.append("    public ").append(cacheInfo.getDtoClassName()).append("(").append(params.toString()).append(") {\n");
+
+        // assignments
+        // first assignment: cache id
+        sb.append("        this.").append(cacheInfo.getCacheEntityIdName()).append(" = ").append(cacheInfo.getCacheEntityIdName()).append(";\n");
+
+        for (FieldInfo fieldInfo : fields) {
+            if (fieldInfo.getName().equals(cacheInfo.getIdName())) continue;
+
+            if (cacheInfo.getParentEntityPath() != null
+                    && isSameEntity(fieldInfo,
+                    cacheInfo.getRelatedEntities().stream()
+                            .filter(re -> re.getEntityPath().equals(cacheInfo.getParentEntityPath()))
+                            .findFirst()
+                            .orElse(null))) {
+
+                RelatedEntity parent = cacheInfo.getRelatedEntities().stream()
+                        .filter(re -> re.getEntityPath().equals(cacheInfo.getParentEntityPath()))
+                        .findFirst().orElse(null);
+                String parentFieldName = parent.getCacheEntityIdName();
+                sb.append("        this.").append(parentFieldName).append(" = ").append(parentFieldName).append(";\n");
+                continue;
+            }
+
+            RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
+                    .filter(re -> isSameEntity(fieldInfo, re))
+                    .findFirst()
+                    .orElse(null);
+
+            if (matched != null && fieldInfo.isManyToOne()) {
+                String fkFieldName = matched.getCacheEntityIdName();
+                sb.append("        this.").append(fkFieldName).append(" = ").append(fkFieldName).append(";\n");
+            }
+            else if(matched != null && (fieldInfo.isOneToMany() || fieldInfo.isManyToMany())){
+                String fkFieldNames = matched.getCacheEntityIdName()+"s";
+                sb.append("        this.").append(fkFieldNames).append(" = ").append(fkFieldNames).append(";\n");
+            }
+            else {
+                sb.append("        this.").append(fieldInfo.getName()).append(" = ").append(fieldInfo.getName()).append(";\n");
+            }
+        }
+
+        sb.append("    }\n\n");
+
         return sb.toString();
     }
 
