@@ -331,14 +331,22 @@ public class DtoGenerator {
                 sb.append("    private static ").append(elemIdType).append(" extractId_").append(up)
                     .append("(").append(entityName).append(" ").append(var).append(") {\n");
             sb.append("        try {\n");
+            // Prefer an entity-level id getter like getUserId() if present
+            sb.append("            try {\n");
+            sb.append("                java.lang.reflect.Method directGetter = ").append(entityName).append(".class.getMethod(\"get").append(Generator.capitalizeFirst(fname)).append("Id\");\n");
+            sb.append("                Object directVal = directGetter.invoke(").append(var).append(");\n");
+            sb.append("                return directVal == null ? null : (").append(elemIdType).append(") directVal;\n");
+            sb.append("            } catch (NoSuchMethodException ignored) {\n");
+            sb.append("                // fall back to field/method based extraction\n");
+            sb.append("            }\n");
             sb.append("            if (!jakarta.persistence.Persistence.getPersistenceUtil().isLoaded(").append(var).append(", \"").append(fname).append("\")) {\n");
             sb.append("                return null;\n");
             sb.append("            }\n");
             sb.append("            Object rel = FIELD_").append(up).append(".get(").append(var).append(");\n");
             sb.append("            if (rel == null) return null;\n");
             sb.append("            try {\n");
-                sb.append("                Object idObj = METHOD_GETID_").append(up).append(".invoke(rel);\n");
-                sb.append("                return idObj == null ? null : (").append(elemIdType).append(") idObj;\n");
+            sb.append("                Object idObj = METHOD_GETID_").append(up).append(".invoke(rel);\n");
+            sb.append("                return idObj == null ? null : (").append(elemIdType).append(") idObj;\n");
             sb.append("            } catch (Exception ex) {\n");
             sb.append("                return null;\n");
             sb.append("            }\n");
