@@ -342,10 +342,10 @@ public class Generator extends AbstractProcessor {
             WebsocketDtoGenerator.process(cacheInfo, processingEnv);
             ControllerGenerator.process(cacheInfo, processingEnv);
             ServiceGenerator.process(cacheInfo, processingEnv);
+            // Generate per-entity AllArgsConstructor factory class under package sharedsync.AllArgsConstructor
+            EntityAllArgsConstructorGenerator.process(cacheInfo, processingEnv);
         }
         
-        // After collecting all cache infos, generate a single AllArgsConstructor file
-        EntityAllArgsConstructorGenerator.processAll(cacheInfoList, processingEnv);
         return false;
     }
 
