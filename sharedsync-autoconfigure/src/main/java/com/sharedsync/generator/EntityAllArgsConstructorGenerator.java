@@ -20,11 +20,11 @@ public class EntityAllArgsConstructorGenerator {
         // No additional initialization needed for this generator
     }
 
-    private static final String FACTORY_PACKAGE = "sharedsync.AllArgsConstructor";
+    private static final String FACTORY_PACKAGE = "sharedsync.allArgsConstructor";
 
     public static boolean process(CacheInformation cacheInfo, ProcessingEnvironment processingEnv) {
         String className = cacheInfo.getEntityName();
-        String factoryClassName = className + "AllArgsConstructor";
+        String factoryClassName = className + "allArgsConstructor";
         String qualifiedFactory = FACTORY_PACKAGE + "." + factoryClassName;
 
         try {

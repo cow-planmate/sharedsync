@@ -1,13 +1,16 @@
 package com.sharedsync.shared.processor;
 
-import com.sharedsync.shared.annotation.CacheEntity;
+import java.io.IOException;
+import java.io.Writer;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 
 import javax.annotation.processing.AbstractProcessor;
-import javax.annotation.processing.Processor;
+import javax.annotation.processing.ProcessingEnvironment;
 import javax.annotation.processing.RoundEnvironment;
 import javax.annotation.processing.SupportedAnnotationTypes;
 import javax.annotation.processing.SupportedSourceVersion;
-import javax.annotation.processing.ProcessingEnvironment;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
@@ -15,11 +18,8 @@ import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
 import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
-import java.io.IOException;
-import java.io.Writer;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
+
+import com.sharedsync.shared.annotation.CacheEntity;
 
 @SupportedAnnotationTypes("com.sharedsync.shared.annotation.CacheEntity")
 @SupportedSourceVersion(SourceVersion.RELEASE_17)
@@ -51,7 +51,7 @@ public class CacheEntityProcessor extends AbstractProcessor {
     private void generateAllArgsFactory(TypeElement type) throws IOException {
         String pkg = processingEnv.getElementUtils().getPackageOf(type).getQualifiedName().toString();
         String className = type.getSimpleName().toString();
-        String factoryClassName = className + "AllArgsConstructor";
+        String factoryClassName = className + "allArgsConstructor";
         String qualifiedFactory = pkg.isEmpty() ? factoryClassName : pkg + "." + factoryClassName;
 
         List<VariableElement> fields = new ArrayList<>();
