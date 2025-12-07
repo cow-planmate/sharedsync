@@ -299,7 +299,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     @SuppressWarnings("unchecked")
     protected final ID extractId(DTO dto) {
         try {
-            return (ID) idField.get(dto);
+            return changeType((ID)idField.get(dto));
         } catch (IllegalAccessException e) {
             throw new RuntimeException("ID 필드에 접근할 수 없습니다: " + idField.getName(), e);
         }
