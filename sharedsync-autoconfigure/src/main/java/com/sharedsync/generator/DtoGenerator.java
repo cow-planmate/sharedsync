@@ -183,29 +183,64 @@ public class DtoGenerator {
         StringBuilder sb = new StringBuilder();
 
         List<FieldInfo> fields = cacheInfo.getEntityFields();
-        // find collection relation fields
+
+        // collect fields that need reflection helpers: ManyToOne (single id) and collection relations
         List<FieldInfo> collectionFields = fields.stream()
                 .filter(f -> f.isOneToMany() || f.isManyToMany())
                 .toList();
 
-        if (collectionFields.isEmpty()) return "";
+        List<FieldInfo> manyToOneFields = fields.stream()
+                .filter(f -> f.isManyToOne())
+                .filter(f -> cacheInfo.getRelatedEntities().stream().anyMatch(re -> isSameEntity(f, re)))
+                .toList();
+
+        if (collectionFields.isEmpty() && manyToOneFields.isEmpty()) return "";
 
         String entityName = cacheInfo.getEntityName();
         String var = Generator.decapitalizeFirst(entityName);
 
-        // declare cached Field and Method variables per collection field
+        // declare cached Field and Method variables per relation field
         for (FieldInfo f : collectionFields) {
             String fname = f.getName();
             String up = fname.toUpperCase();
             sb.append("    private static final java.lang.reflect.Field FIELD_").append(up).append(";\n");
             sb.append("    private static final java.lang.reflect.Method METHOD_GETID_").append(up).append(";\n");
         }
+        for (FieldInfo f : manyToOneFields) {
+            String fname = f.getName();
+            String up = fname.toUpperCase();
+            // avoid duplicate declarations if already declared as collection
+            if (collectionFields.stream().noneMatch(cf -> cf.getName().equals(fname))) {
+                sb.append("    private static final java.lang.reflect.Field FIELD_").append(up).append(";\n");
+                sb.append("    private static final java.lang.reflect.Method METHOD_GETID_").append(up).append(";\n");
+            }
+        }
 
         sb.append("\n    static {\n");
         sb.append("        try {\n");
 
-        // initialize each cached field and method
+        // initialize each cached field and method for collection fields
         for (FieldInfo f : collectionFields) {
+            String fname = f.getName();
+            String up = fname.toUpperCase();
+            RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
+                    .filter(re -> isSameEntity(f, re))
+                    .findFirst().orElse(null);
+
+            sb.append("            FIELD_").append(up).append(" = ").append(entityName).append(".class.getDeclaredField(\"").append(fname).append("\");\n");
+            sb.append("            FIELD_").append(up).append(".setAccessible(true);\n");
+
+            if (matched != null) {
+                String elemSimple = Generator.removePath(matched.getEntityPath());
+                String idMethod = "get" + Generator.capitalizeFirst(matched.getEntityIdName());
+                sb.append("            METHOD_GETID_").append(up).append(" = ").append(elemSimple).append(".class.getMethod(\"").append(idMethod).append("\");\n");
+            } else {
+                sb.append("            METHOD_GETID_").append(up).append(" = Object.class.getMethod(\"toString\");\n");
+            }
+        }
+
+        // initialize each cached field and method for many-to-one fields
+        for (FieldInfo f : manyToOneFields) {
             String fname = f.getName();
             String up = fname.toUpperCase();
             RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
@@ -229,34 +264,69 @@ public class DtoGenerator {
         sb.append("        }\n");
         sb.append("    }\n\n");
 
-        // helper method that returns raw Object ids list; cast at callsite to expected generic
-        sb.append("    @SuppressWarnings(\"unchecked\")\n");
-        sb.append("    private static java.util.List<java.lang.Object> extractIds(")
-                .append(entityName).append(" ").append(var)
-                .append(", String attrName, java.lang.reflect.Field cachedField, java.lang.reflect.Method getIdMethod) {\n");
-        sb.append("        try {\n");
-        sb.append("            if (!jakarta.persistence.Persistence.getPersistenceUtil().isLoaded(").append(var).append(", attrName)) {\n");
-        sb.append("                return java.util.List.of();\n");
-        sb.append("            }\n");
-        sb.append("            Object val = cachedField.get(").append(var).append(");\n");
-        sb.append("            if (val == null) return java.util.List.of();\n");
-        sb.append("            java.util.Collection<?> coll = (java.util.Collection<?>) val;\n");
-        sb.append("            return coll.stream()\n");
-        sb.append("                    .filter(java.util.Objects::nonNull)\n");
-        sb.append("                    .map(elem -> {\n");
-        sb.append("                        try {\n");
-        sb.append("                            Object idObj = getIdMethod.invoke(elem);\n");
-        sb.append("                            return idObj;\n");
-        sb.append("                        } catch (Exception ex) {\n");
-        sb.append("                            return null;\n");
-        sb.append("                        }\n");
-        sb.append("                    })\n");
-        sb.append("                    .filter(java.util.Objects::nonNull)\n");
-        sb.append("                    .toList();\n");
-        sb.append("        } catch (IllegalAccessException ex) {\n");
-        sb.append("            return java.util.List.of();\n");
-        sb.append("        }\n");
-        sb.append("    }\n\n");
+        // generate typed helper methods per field
+        for (FieldInfo f : collectionFields) {
+            String fname = f.getName();
+            String up = fname.toUpperCase();
+            RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
+                    .filter(re -> isSameEntity(f, re))
+                    .findFirst().orElse(null);
+            String idType = matched != null ? Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType()) : "java.lang.Object";
+
+            sb.append("    private static java.util.List<").append(idType).append("> extractIds_").append(up)
+                    .append("(").append(entityName).append(" ").append(var).append(") {\n");
+            sb.append("        try {\n");
+            sb.append("            if (!jakarta.persistence.Persistence.getPersistenceUtil().isLoaded(").append(var).append(", \"").append(fname).append("\")) {\n");
+            sb.append("                return java.util.List.of();\n");
+            sb.append("            }\n");
+            sb.append("            Object val = FIELD_").append(up).append(".get(").append(var).append(");\n");
+            sb.append("            if (val == null) return java.util.List.of();\n");
+            sb.append("            java.util.Collection<?> coll = (java.util.Collection<?>) val;\n");
+            sb.append("            return coll.stream()\n");
+            sb.append("                    .filter(java.util.Objects::nonNull)\n");
+            sb.append("                    .map(elem -> {\n");
+            sb.append("                        try {\n");
+            sb.append("                            Object idObj = METHOD_GETID_").append(up).append(".invoke(elem);\n");
+            sb.append("                            return (").append(idType).append(") idObj;\n");
+            sb.append("                        } catch (Exception ex) {\n");
+            sb.append("                            return null;\n");
+            sb.append("                        }\n");
+            sb.append("                    })\n");
+            sb.append("                    .filter(java.util.Objects::nonNull)\n");
+            sb.append("                    .toList();\n");
+            sb.append("        } catch (IllegalAccessException ex) {\n");
+            sb.append("            return java.util.List.of();\n");
+            sb.append("        }\n");
+            sb.append("    }\n\n");
+        }
+
+        for (FieldInfo f : manyToOneFields) {
+            String fname = f.getName();
+            String up = fname.toUpperCase();
+            RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
+                    .filter(re -> isSameEntity(f, re))
+                    .findFirst().orElse(null);
+            String idType = matched != null ? Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType()) : "java.lang.Object";
+
+            sb.append("    private static ").append(idType).append(" extractId_").append(up)
+                    .append("(").append(entityName).append(" ").append(var).append(") {\n");
+            sb.append("        try {\n");
+            sb.append("            if (!jakarta.persistence.Persistence.getPersistenceUtil().isLoaded(").append(var).append(", \"").append(fname).append("\")) {\n");
+            sb.append("                return null;\n");
+            sb.append("            }\n");
+            sb.append("            Object rel = FIELD_").append(up).append(".get(").append(var).append(");\n");
+            sb.append("            if (rel == null) return null;\n");
+            sb.append("            try {\n");
+            sb.append("                Object idObj = METHOD_GETID_").append(up).append(".invoke(rel);\n");
+            sb.append("                return idObj == null ? null : (").append(idType).append(") idObj;\n");
+            sb.append("            } catch (Exception ex) {\n");
+            sb.append("                return null;\n");
+            sb.append("            }\n");
+            sb.append("        } catch (IllegalAccessException ex) {\n");
+            sb.append("            return null;\n");
+            sb.append("        }\n");
+            sb.append("    }\n\n");
+        }
 
         return sb.toString();
     }
@@ -530,24 +600,21 @@ public class DtoGenerator {
                     .findFirst().orElse(null);
 
             if (match != null) {
-                // ManyToOne -> single id
+                // ManyToOne -> use reflection helper to extract related id (handles missing getters)
                 if (field.isManyToOne()) {
+                    String fname = field.getName();
+                    String up = fname.toUpperCase();
                     sb.append("                ");
-                    sb.append(var).append(".get")
-                            .append(Generator.capitalizeFirst(field.getName())).append("()")
-                            .append(".get")
-                            .append(Generator.capitalizeFirst(match.getEntityIdName())).append("(),\n");
+                    sb.append("extractId_").append(up).append("(").append(var).append("),\n");
                     continue;
                 }
 
-                // OneToMany/ManyToMany -> map collection to list of ids (e.g. user.getUserBooks().stream().map(UserBook::getId).toList())
+                // OneToMany/ManyToMany -> use typed reflection helper to extract list of ids
                 if (field.isOneToMany() || field.isManyToMany()) {
                     String fname = field.getName();
                     String up = fname.toUpperCase();
-                    String idType = Generator.denormalizeType(match.getEntityIdType(), match.getEntityIdOriginalType());
                     sb.append("                ");
-                    sb.append("(java.util.List<").append(idType).append(">) extractIds(")
-                        .append(var).append(", \"").append(fname).append("\", FIELD_").append(up).append(", METHOD_GETID_").append(up).append(") ,\n");
+                    sb.append("extractIds_").append(up).append("(").append(var).append("),\n");
                     continue;
                 }
             }
