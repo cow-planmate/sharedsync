@@ -829,17 +829,23 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 return null;
             }
 
-            // 1차 시도: DTO에서 같은 이름의 필드 찾기
-            Field dtoIdField = findFieldInHierarchy(dtoClass, idFieldName);
-            if (dtoIdField != null) {
-                dtoIdField.setAccessible(true);
-                Object idValue = dtoIdField.get(dto);
-                if (idValue != null) {
-                    return idValue;
+            // 1순위: 필드명 패턴 매칭 (cache + EntityClassName + Id) - 가장 정확함
+            String entitySimpleName = entityClass.getSimpleName();
+            String patternFieldName = "cache" + entitySimpleName + "Id";
+            System.err.println("[SharedSync][DEBUG] extractRelatedId: entityClass=" + entitySimpleName + ", looking for field=" + patternFieldName);
+            Field patternField = findFieldInHierarchy(dtoClass, patternFieldName);
+            if (patternField != null) {
+                patternField.setAccessible(true);
+                Object patternValue = patternField.get(dto);
+                System.err.println("[SharedSync][DEBUG] extractRelatedId: found field=" + patternFieldName + ", value=" + patternValue);
+                if (patternValue != null) {
+                    return patternValue;
                 }
+            } else {
+                System.err.println("[SharedSync][DEBUG] extractRelatedId: field not found=" + patternFieldName);
             }
 
-            // 2차 시도: DTO에서 @ParentId(entityClass)가 붙은 필드 또는 @CacheId가 붙은 필드 찾기
+            // 2순위: DTO에서 @ParentId(entityClass)가 붙은 필드 찾기
             for (Field field : getAllFieldsInHierarchy(dtoClass)) {
                 field.setAccessible(true);
                 
@@ -847,24 +853,20 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 ParentId parentIdAnnotation = field.getAnnotation(ParentId.class);
                 if (parentIdAnnotation != null && parentIdAnnotation.value() == entityClass) {
                     Object idValue = field.get(dto);
-                    return idValue;
-                }
-                
-                // @CacheId 어노테이션 확인 - 해당 엔티티의 ID인 경우
-                CacheId cacheIdAnnotation = field.getAnnotation(CacheId.class);
-                if (cacheIdAnnotation != null) {
-                    Object idValue = field.get(dto);
-                    return idValue;
+                    if (idValue != null) {
+                        return idValue;
+                    }
                 }
             }
 
-            // 3차 시도: 필드명 패턴 매칭 (cache + EntityClassName + Id)
-            String entitySimpleName = entityClass.getSimpleName();
-            String patternFieldName = "cache" + entitySimpleName + "Id";
-            Field patternField = findFieldInHierarchy(dtoClass, patternFieldName);
-            if (patternField != null) {
-                patternField.setAccessible(true);
-                return patternField.get(dto);
+            // 3순위: DTO에서 엔티티 ID 필드와 같은 이름의 필드 찾기 (마지막 폴백)
+            Field dtoIdField = findFieldInHierarchy(dtoClass, idFieldName);
+            if (dtoIdField != null) {
+                dtoIdField.setAccessible(true);
+                Object idValue = dtoIdField.get(dto);
+                if (idValue != null) {
+                    return idValue;
+                }
             }
 
             return null;
