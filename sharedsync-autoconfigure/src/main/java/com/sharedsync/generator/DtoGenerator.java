@@ -37,6 +37,7 @@ public class DtoGenerator {
                 + " extends CacheDto<" + cacheInfo.getIdType() + "> {\n\n"
                 + writeDtoFields(cacheInfo)
                 + writeConstructors(cacheInfo)
+                + writeIdGetter(cacheInfo)
                 + writeFromEntityMethod(cacheInfo)
                 + writeToEntityMethodUsingProcessor(cacheInfo)
                 + "}";
@@ -274,6 +275,22 @@ public class DtoGenerator {
             }
         }
 
+        sb.append("    }\n\n");
+
+        return sb.toString();
+    }
+
+    // ==========================================
+    // Getter for cache id
+    // ==========================================
+    private static String writeIdGetter(CacheInformation cacheInfo) {
+        StringBuilder sb = new StringBuilder();
+        String idType = cacheInfo.getIdType();
+        String idField = cacheInfo.getCacheEntityIdName();
+        String getterName = "get" + Generator.capitalizeFirst(idField);
+
+        sb.append("    public ").append(idType).append(" ").append(getterName).append("() {\n");
+        sb.append("        return this.").append(idField).append(";\n");
         sb.append("    }\n\n");
 
         return sb.toString();
