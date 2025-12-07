@@ -337,13 +337,15 @@ public class Generator extends AbstractProcessor {
             initialize(cacheInfo);
 
             // 실제 파일 생성기 호출
-            EntityAllArgsConstructorGenerator.process(cacheInfo, processingEnv);
             CacheEntityGenerator.process(cacheInfo, processingEnv);
             DtoGenerator.process(cacheInfo, processingEnv);
             WebsocketDtoGenerator.process(cacheInfo, processingEnv);
             ControllerGenerator.process(cacheInfo, processingEnv);
             ServiceGenerator.process(cacheInfo, processingEnv);
         }
+
+        // After collecting all cache infos, generate a single AllArgsConstructor file
+        EntityAllArgsConstructorGenerator.processAll(cacheInfoList, processingEnv);
 
         return false;
     }
