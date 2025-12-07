@@ -79,8 +79,8 @@ public class DtoGenerator {
         if (cacheInfo.getEntityPath() != null) {
             sb.append("import ").append(cacheInfo.getEntityPath()).append(";\n");
         }
-        // Import the per-entity factory class from the allArgsConstructor package
-        sb.append("import sharedsync.allArgsConstructor.").append(cacheInfo.getEntityName()).append("allArgsConstructor;\n");
+        // Import the per-entity factory class from the AllArgsConstructor package
+        sb.append("import sharedsync.allArgsConstructor.").append(cacheInfo.getEntityName()).append("AllArgsConstructor;\n");
         Set<String> collectionImports = new HashSet<>();
         for (RelatedEntity relatedEntity : cacheInfo.getRelatedEntities()) {
             if (relatedEntity.getEntityPath() != null) {
@@ -144,7 +144,7 @@ public class DtoGenerator {
         sb.append(") {\n");
 
         // Use the per-entity factory class (imported above)
-        String factoryName = cacheInfo.getEntityName() + "allArgsConstructor";
+        String factoryName = cacheInfo.getEntityName() + "AllArgsConstructor";
 
         sb.append("        return ").append(factoryName).append(".create(\n");
 
@@ -307,7 +307,7 @@ public class DtoGenerator {
             sb.append("                    .map(elem -> {\n");
             sb.append("                        try {\n");
             sb.append("                            Object idObj = METHOD_GETID_").append(up).append(".invoke(elem);\n");
-            sb.append("                            return (").append(idType).append(") idObj;\n");
+            sb.append("                            return (").append(elemIdType).append(") idObj;\n");
             sb.append("                        } catch (Exception ex) {\n");
             sb.append("                            return null;\n");
             sb.append("                        }\n");
@@ -337,8 +337,8 @@ public class DtoGenerator {
             sb.append("            Object rel = FIELD_").append(up).append(".get(").append(var).append(");\n");
             sb.append("            if (rel == null) return null;\n");
             sb.append("            try {\n");
-            sb.append("                Object idObj = METHOD_GETID_").append(up).append(".invoke(rel);\n");
-            sb.append("                return idObj == null ? null : (").append(idType).append(") idObj;\n");
+                sb.append("                Object idObj = METHOD_GETID_").append(up).append(".invoke(rel);\n");
+                sb.append("                return idObj == null ? null : (").append(elemIdType).append(") idObj;\n");
             sb.append("            } catch (Exception ex) {\n");
             sb.append("                return null;\n");
             sb.append("            }\n");
