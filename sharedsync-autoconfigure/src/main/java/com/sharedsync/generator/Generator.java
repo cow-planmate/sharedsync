@@ -343,7 +343,7 @@ public class Generator extends AbstractProcessor {
             ControllerGenerator.process(cacheInfo, processingEnv);
             ServiceGenerator.process(cacheInfo, processingEnv);
             // Generate per-entity allArgsConstructor factory class under package sharedsync.allArgsConstructor
-            EntityallArgsConstructorGenerator.process(cacheInfo, processingEnv);
+            EntityAllArgsConstructorGenerator.process(cacheInfo, processingEnv);
         }
         
         return false;
@@ -353,7 +353,7 @@ public class Generator extends AbstractProcessor {
     // Generator 초기화
     // ================================
     public static void initialize(CacheInformation cacheInfo) {
-        EntityallArgsConstructorGenerator.initialize(cacheInfo);
+        EntityAllArgsConstructorGenerator.initialize(cacheInfo);
         CacheEntityGenerator.initialize(cacheInfo);
         DtoGenerator.initialize(cacheInfo);
         WebsocketDtoGenerator.initialize(cacheInfo);
