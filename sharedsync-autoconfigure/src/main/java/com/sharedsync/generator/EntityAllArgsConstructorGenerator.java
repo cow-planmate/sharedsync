@@ -133,6 +133,120 @@ public class EntityAllArgsConstructorGenerator {
         return true;
     }
 
+    /**
+     * Generate a single AllArgsConstructor.java under package sharedsync containing
+     * nested factory classes for all entities.
+     */
+    public static boolean processAll(java.util.List<CacheInformation> cacheInfoList, ProcessingEnvironment processingEnv) {
+        final String pkg = "sharedsync";
+        final String outerClass = "AllArgsConstructor";
+        String qualified = pkg + "." + outerClass;
+
+        try {
+            JavaFileObject jfo = processingEnv.getFiler().createSourceFile(qualified);
+            try (Writer w = jfo.openWriter()) {
+                w.write("package " + pkg + ";\n\n");
+
+                // import all entity paths
+                for (CacheInformation ci : cacheInfoList) {
+                    if (ci.getEntityPath() != null) {
+                        w.write("import " + ci.getEntityPath() + ";\n");
+                    }
+                }
+                w.write("\n");
+
+                w.write("public class " + outerClass + " {\n\n");
+
+                // nested factory classes
+                for (CacheInformation cacheInfo : cacheInfoList) {
+                    String className = cacheInfo.getEntityName();
+                    String factoryClassName = className + "AllArgsConstructor";
+
+                    w.write("    public static class " + factoryClassName + " {\n\n");
+
+                    // cached fields
+                    w.write("        private static final java.lang.reflect.Constructor<" + className + "> CONSTRUCTOR;\n");
+                    w.write("        private static final boolean USE_UNSAFE;\n");
+                    w.write("        private static final sun.misc.Unsafe UNSAFE;\n");
+                    for (FieldInfo f : cacheInfo.getEntityFields()) {
+                        String n = f.getName();
+                        w.write("        private static final java.lang.reflect.Field FIELD_" + n.toUpperCase() + ";\n");
+                    }
+
+                    w.write("\n");
+                    w.write("        static {\n");
+                    w.write("            try {\n");
+                    w.write("                java.lang.reflect.Constructor<" + className + "> ctor = null;\n");
+                    w.write("                boolean useUnsafe = false;\n");
+                    w.write("                sun.misc.Unsafe unsafe = null;\n");
+                    w.write("                try {\n");
+                    w.write("                    ctor = " + className + ".class.getDeclaredConstructor();\n");
+                    w.write("                    ctor.setAccessible(true);\n");
+                    w.write("                } catch (NoSuchMethodException e) {\n");
+                    w.write("                    useUnsafe = true;\n");
+                    w.write("                    java.lang.reflect.Field unsafeField = sun.misc.Unsafe.class.getDeclaredField(\"theUnsafe\");\n");
+                    w.write("                    unsafeField.setAccessible(true);\n");
+                    w.write("                    unsafe = (sun.misc.Unsafe) unsafeField.get(null);\n");
+                    w.write("                }\n");
+                    w.write("                CONSTRUCTOR = ctor;\n");
+                    w.write("                USE_UNSAFE = useUnsafe;\n");
+                    w.write("                UNSAFE = unsafe;\n");
+                    for (FieldInfo f : cacheInfo.getEntityFields()) {
+                        String n = f.getName();
+                        w.write("                FIELD_" + n.toUpperCase() + " = " + className + ".class.getDeclaredField(\"" + n + "\");\n");
+                        w.write("                FIELD_" + n.toUpperCase() + ".setAccessible(true);\n");
+                    }
+                    w.write("            } catch (Exception e) {\n");
+                    w.write("                throw new ExceptionInInitializerError(e);\n");
+                    w.write("            }\n");
+                    w.write("        }\n\n");
+
+                    // create method
+                    w.write("        public static " + className + " create(");
+                    StringBuilder params = new StringBuilder();
+                    for (int i = 0; i < cacheInfo.getEntityFields().size(); i++) {
+                        FieldInfo f = cacheInfo.getEntityFields().get(i);
+                        String t;
+                        if (f.isOneToMany() || f.isManyToMany()) {
+                            // for collection relations use List<FullType>
+                            t = "java.util.List<" + f.getType() + ">";
+                        } else {
+                            t = Generator.denormalizeType(f.getType(), f.getOriginalType());
+                        }
+                        String n = f.getName();
+                        params.append(t).append(" ").append(n);
+                        if (i < cacheInfo.getEntityFields().size() - 1) params.append(", ");
+                    }
+                    w.write(params.toString());
+                    w.write(") {\n");
+
+                    w.write("            try {\n");
+                    w.write("                " + className + " instance = USE_UNSAFE\n");
+                    w.write("                    ? (" + className + ") UNSAFE.allocateInstance(" + className + ".class)\n");
+                    w.write("                    : CONSTRUCTOR.newInstance();\n");
+                    for (FieldInfo f : cacheInfo.getEntityFields()) {
+                        String n = f.getName();
+                        w.write("                FIELD_" + n.toUpperCase() + ".set(instance, " + n + ");\n");
+                    }
+                    w.write("                return instance;\n");
+                    w.write("            } catch (Exception e) {\n");
+                    w.write("                throw new RuntimeException(\"Failed to create " + className + " instance\", e);\n");
+                    w.write("            }\n");
+                    w.write("        }\n\n");
+
+                    w.write("    }\n\n");
+                }
+
+                w.write("}\n");
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        }
+
+        return true;
+    }
+
     
 
 }
