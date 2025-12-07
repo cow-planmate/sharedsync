@@ -31,6 +31,8 @@ public class DtoGenerator {
                 + "import com.sharedsync.shared.dto.CacheDto;\n"
                 + writeEntityPath(cacheInfo)
                 + "@Cache\n"
+                + "@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)\n"
+                + "@com.fasterxml.jackson.annotation.JsonAutoDetect(fieldVisibility = com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.ANY)\n"
                 + writeAutoDatabaseLoader(cacheInfo)
                 + writeAutoEntityConverter(cacheInfo)
                 + "public class " + cacheInfo.getDtoClassName()
