@@ -14,7 +14,7 @@ import com.sharedsync.generator.Generator.FieldInfo;
  * the entity with all fields set via reflection. Works even if the entity has
  * no constructors (uses Unsafe as fallback).
  */
-public class EntityallArgsConstructorGenerator {
+public class EntityAllArgsConstructorGenerator {
 
     public static void initialize(CacheInformation cacheInfo) {
         // No additional initialization needed for this generator
