@@ -688,6 +688,165 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 .toList();
     }
 
+    // ==== 필드명으로 캐시 검색 (JPA 스타일) ====
+
+    /**
+     * 특정 필드명과 값으로 캐시에서 DTO 리스트 조회
+     * JPA의 findByXxx 처럼 사용 가능
+     * 예: findByField("cacheUserId", 1L) → cacheUserId가 1인 모든 DTO 반환
+     * 
+     * @param fieldName DTO의 필드명 (예: "cacheUserId", "cacheBookId", "category")
+     * @param value 검색할 값
+     * @return 매칭되는 DTO 리스트
+     */
+    public List<DTO> findByField(String fieldName, Object value) {
+        if (fieldName == null || value == null) {
+            return Collections.emptyList();
+        }
+
+        Field targetField = findFieldInHierarchy(dtoClass, fieldName);
+        if (targetField == null) {
+            System.err.println("[SharedSync] Field not found: " + fieldName + " in " + dtoClass.getSimpleName());
+            return Collections.emptyList();
+        }
+        targetField.setAccessible(true);
+
+        return findAllDtos().stream()
+                .filter(dto -> matchesFieldValue(dto, targetField, value))
+                .toList();
+    }
+
+    /**
+     * 특정 필드명과 값으로 캐시에서 Entity 리스트 조회
+     */
+    public List<T> findEntitiesByField(String fieldName, Object value) {
+        return findByField(fieldName, value).stream()
+                .map(this::convertToEntity)
+                .toList();
+    }
+
+    /**
+     * 특정 필드명과 값으로 캐시에서 단일 DTO 조회 (첫 번째 매칭)
+     */
+    public Optional<DTO> findOneByField(String fieldName, Object value) {
+        List<DTO> results = findByField(fieldName, value);
+        return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
+    }
+
+    /**
+     * 특정 필드명과 값으로 캐시에서 단일 Entity 조회
+     */
+    public Optional<T> findOneEntityByField(String fieldName, Object value) {
+        return findOneByField(fieldName, value).map(this::convertToEntity);
+    }
+
+    /**
+     * 여러 필드 조건으로 캐시에서 DTO 리스트 조회 (AND 조건)
+     * 예: findByFields(Map.of("cacheUserId", 1L, "category", "Reading"))
+     */
+    public List<DTO> findByFields(Map<String, Object> fieldValues) {
+        if (fieldValues == null || fieldValues.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // 각 필드에 대한 Field 객체 미리 찾기
+        Map<Field, Object> fieldMap = new java.util.HashMap<>();
+        for (Map.Entry<String, Object> entry : fieldValues.entrySet()) {
+            Field field = findFieldInHierarchy(dtoClass, entry.getKey());
+            if (field == null) {
+                System.err.println("[SharedSync] Field not found: " + entry.getKey() + " in " + dtoClass.getSimpleName());
+                return Collections.emptyList();
+            }
+            field.setAccessible(true);
+            fieldMap.put(field, entry.getValue());
+        }
+
+        return findAllDtos().stream()
+                .filter(dto -> {
+                    for (Map.Entry<Field, Object> entry : fieldMap.entrySet()) {
+                        if (!matchesFieldValue(dto, entry.getKey(), entry.getValue())) {
+                            return false;
+                        }
+                    }
+                    return true;
+                })
+                .toList();
+    }
+
+    /**
+     * 캐시에서 모든 DTO 조회
+     */
+    public List<DTO> findAllDtos() {
+        String pattern = cacheKeyPrefix + ":*";
+        Set<String> keys = getRedisTemplate().keys(pattern);
+        if (keys == null || keys.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<DTO> allDtos = getRedisTemplate().opsForValue().multiGet(keys);
+        if (allDtos == null) {
+            return Collections.emptyList();
+        }
+
+        return allDtos.stream()
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    /**
+     * 캐시에서 모든 Entity 조회
+     */
+    public List<T> findAllEntities() {
+        return findAllDtos().stream()
+                .map(this::convertToEntity)
+                .toList();
+    }
+
+    /**
+     * DTO의 필드 값이 주어진 값과 일치하는지 확인 (타입 유연 비교)
+     */
+    private boolean matchesFieldValue(DTO dto, Field field, Object expectedValue) {
+        try {
+            Object actualValue = field.get(dto);
+            
+            if (actualValue == null && expectedValue == null) {
+                return true;
+            }
+            if (actualValue == null || expectedValue == null) {
+                return false;
+            }
+
+            // 동일 타입이면 equals 비교
+            if (actualValue.getClass().equals(expectedValue.getClass())) {
+                return Objects.equals(actualValue, expectedValue);
+            }
+
+            // Enum 비교: String으로 비교
+            if (actualValue.getClass().isEnum() || expectedValue.getClass().isEnum()) {
+                return actualValue.toString().equals(expectedValue.toString());
+            }
+
+            // 숫자 타입 비교: Long, Integer 등
+            if (actualValue instanceof Number && expectedValue instanceof Number) {
+                return ((Number) actualValue).longValue() == ((Number) expectedValue).longValue();
+            }
+
+            // 타입이 다르면 문자열로 비교
+            return actualValue.toString().equals(expectedValue.toString());
+        } catch (IllegalAccessException e) {
+            return false;
+        }
+    }
+
+    /**
+     * 이 DTO가 가진 모든 필드명 목록 반환 (디버그/개발용)
+     */
+    public List<String> getAvailableFieldNames() {
+        return dtoFields.stream()
+                .map(Field::getName)
+                .toList();
+    }
+
     private Object[] buildEntityConverterParameters(DTO dto) throws Exception {
         // DTO 전체 내용 출력 (디버그용)
         System.err.println("[SharedSync][DEBUG] buildEntityConverterParameters for DTO: " + dtoClass.getSimpleName());
