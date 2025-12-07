@@ -24,7 +24,7 @@ public class EntityAllArgsConstructorGenerator {
 
     public static boolean process(CacheInformation cacheInfo, ProcessingEnvironment processingEnv) {
         String className = cacheInfo.getEntityName();
-        String factoryClassName = className + "allArgsConstructor";
+        String factoryClassName = className + "AllArgsConstructor";
         String qualifiedFactory = FACTORY_PACKAGE + "." + factoryClassName;
 
         try {

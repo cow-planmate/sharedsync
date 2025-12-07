@@ -291,9 +291,9 @@ public class DtoGenerator {
             RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
                     .filter(re -> isSameEntity(f, re))
                     .findFirst().orElse(null);
-            String idType = matched != null ? Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType()) : "java.lang.Object";
+                String elemIdType = matched != null ? Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType()) : "java.lang.Object";
 
-            sb.append("    private static java.util.List<").append(idType).append("> extractIds_").append(up)
+                sb.append("    private static java.util.List<").append(elemIdType).append("> extractIds_").append(up)
                     .append("(").append(entityName).append(" ").append(var).append(") {\n");
             sb.append("        try {\n");
             sb.append("            if (!jakarta.persistence.Persistence.getPersistenceUtil().isLoaded(").append(var).append(", \"").append(fname).append("\")) {\n");
@@ -326,9 +326,9 @@ public class DtoGenerator {
             RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
                     .filter(re -> isSameEntity(f, re))
                     .findFirst().orElse(null);
-            String idType = matched != null ? Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType()) : "java.lang.Object";
+                String elemIdType = matched != null ? Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType()) : "java.lang.Object";
 
-            sb.append("    private static ").append(idType).append(" extractId_").append(up)
+                sb.append("    private static ").append(elemIdType).append(" extractId_").append(up)
                     .append("(").append(entityName).append(" ").append(var).append(") {\n");
             sb.append("        try {\n");
             sb.append("            if (!jakarta.persistence.Persistence.getPersistenceUtil().isLoaded(").append(var).append(", \"").append(fname).append("\")) {\n");
