@@ -40,6 +40,7 @@ public class DtoGenerator {
                 + writeDtoFields(cacheInfo)
                 + writeConstructors(cacheInfo)
                 + writeIdGetter(cacheInfo)
+                + writeReflectionCacheAndHelpers(cacheInfo)
                 + writeFromEntityMethod(cacheInfo)
                 + writeToEntityMethodUsingProcessor(cacheInfo)
                 + "}";
@@ -170,6 +171,91 @@ public class DtoGenerator {
         // remove trailing comma and newline
         if (sb.length() >= 2) sb.setLength(sb.length() - 2);
         sb.append("\n        );\n");
+        sb.append("    }\n\n");
+
+        return sb.toString();
+    }
+
+    // ==========================================
+    // Reflection cache and helper method (generated when collection relations exist)
+    // ==========================================
+    private static String writeReflectionCacheAndHelpers(CacheInformation cacheInfo) {
+        StringBuilder sb = new StringBuilder();
+
+        List<FieldInfo> fields = cacheInfo.getEntityFields();
+        // find collection relation fields
+        List<FieldInfo> collectionFields = fields.stream()
+                .filter(f -> f.isOneToMany() || f.isManyToMany())
+                .toList();
+
+        if (collectionFields.isEmpty()) return "";
+
+        String entityName = cacheInfo.getEntityName();
+        String var = Generator.decapitalizeFirst(entityName);
+
+        // declare cached Field and Method variables per collection field
+        for (FieldInfo f : collectionFields) {
+            String fname = f.getName();
+            String up = fname.toUpperCase();
+            sb.append("    private static final java.lang.reflect.Field FIELD_").append(up).append(";\n");
+            sb.append("    private static final java.lang.reflect.Method METHOD_GETID_").append(up).append(";\n");
+        }
+
+        sb.append("\n    static {\n");
+        sb.append("        try {\n");
+
+        // initialize each cached field and method
+        for (FieldInfo f : collectionFields) {
+            String fname = f.getName();
+            String up = fname.toUpperCase();
+            RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
+                    .filter(re -> isSameEntity(f, re))
+                    .findFirst().orElse(null);
+
+            sb.append("            FIELD_").append(up).append(" = ").append(entityName).append(".class.getDeclaredField(\"").append(fname).append("\");\n");
+            sb.append("            FIELD_").append(up).append(".setAccessible(true);\n");
+
+            if (matched != null) {
+                String elemSimple = Generator.removePath(matched.getEntityPath());
+                String idMethod = "get" + Generator.capitalizeFirst(matched.getEntityIdName());
+                sb.append("            METHOD_GETID_").append(up).append(" = ").append(elemSimple).append(".class.getMethod(\"").append(idMethod).append("\");\n");
+            } else {
+                sb.append("            METHOD_GETID_").append(up).append(" = Object.class.getMethod(\"toString\");\n");
+            }
+        }
+
+        sb.append("        } catch (Exception e) {\n");
+        sb.append("            throw new ExceptionInInitializerError(e);\n");
+        sb.append("        }\n");
+        sb.append("    }\n\n");
+
+        // helper method that returns raw Object ids list; cast at callsite to expected generic
+        sb.append("    @SuppressWarnings(\"unchecked\")\n");
+        sb.append("    private static java.util.List<java.lang.Object> extractIds(")
+                .append(entityName).append(" ").append(var)
+                .append(", String attrName, java.lang.reflect.Field cachedField, java.lang.reflect.Method getIdMethod) {\n");
+        sb.append("        try {\n");
+        sb.append("            if (!jakarta.persistence.Persistence.getPersistenceUtil().isLoaded(").append(var).append(", attrName)) {\n");
+        sb.append("                return java.util.List.of();\n");
+        sb.append("            }\n");
+        sb.append("            Object val = cachedField.get(").append(var).append(");\n");
+        sb.append("            if (val == null) return java.util.List.of();\n");
+        sb.append("            java.util.Collection<?> coll = (java.util.Collection<?>) val;\n");
+        sb.append("            return coll.stream()\n");
+        sb.append("                    .filter(java.util.Objects::nonNull)\n");
+        sb.append("                    .map(elem -> {\n");
+        sb.append("                        try {\n");
+        sb.append("                            Object idObj = getIdMethod.invoke(elem);\n");
+        sb.append("                            return idObj;\n");
+        sb.append("                        } catch (Exception ex) {\n");
+        sb.append("                            return null;\n");
+        sb.append("                        }\n");
+        sb.append("                    })\n");
+        sb.append("                    .filter(java.util.Objects::nonNull)\n");
+        sb.append("                    .toList();\n");
+        sb.append("        } catch (IllegalAccessException ex) {\n");
+        sb.append("            return java.util.List.of();\n");
+        sb.append("        }\n");
         sb.append("    }\n\n");
 
         return sb.toString();
@@ -456,14 +542,12 @@ public class DtoGenerator {
 
                 // OneToMany/ManyToMany -> map collection to list of ids (e.g. user.getUserBooks().stream().map(UserBook::getId).toList())
                 if (field.isOneToMany() || field.isManyToMany()) {
-                    String elemSimple = Generator.removePath(match.getEntityPath());
-                    String idMethodRef = elemSimple + "::get" + Generator.capitalizeFirst(match.getEntityIdName());
+                    String fname = field.getName();
+                    String up = fname.toUpperCase();
+                    String idType = Generator.denormalizeType(match.getEntityIdType(), match.getEntityIdOriginalType());
                     sb.append("                ");
-                    sb.append("(!Persistence.getPersistenceUtil().isLoaded(")
-                        .append(var).append(", \"").append(field.getName()).append("\")) ? java.util.List.of() : (")
-                        .append(var).append(".get").append(Generator.capitalizeFirst(field.getName())).append("() == null ? java.util.List.of() : ")
-                        .append(var).append(".get").append(Generator.capitalizeFirst(field.getName())).append("().stream().map(")
-                        .append(idMethodRef).append(").toList()),\n");
+                    sb.append("(java.util.List<").append(idType).append(">) extractIds(")
+                        .append(var).append(", \"").append(fname).append("\", FIELD_").append(up).append(", METHOD_GETID_").append(up).append(") ,\n");
                     continue;
                 }
             }
