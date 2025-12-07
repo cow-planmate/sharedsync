@@ -21,7 +21,7 @@ public class WsAuthChannelInterceptor implements ChannelInterceptor {
 
     private final AuthenticationTokenResolver tokenResolver;
     private final List<StompAccessValidator> accessValidators;
-    private final SharedSyncAuthProperties authProperties; // ← 추가됨
+    private final SharedSyncAuthProperties authProperties;
 
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {

@@ -78,8 +78,8 @@ public class DtoGenerator {
         if (cacheInfo.getEntityPath() != null) {
             sb.append("import ").append(cacheInfo.getEntityPath()).append(";\n");
         }
-        // Import the per-entity factory class from the AllArgsConstructor package
-        sb.append("import sharedsync.AllArgsConstructor.").append(cacheInfo.getEntityName()).append("AllArgsConstructor;\n");
+        // Import the per-entity factory class from the allArgsConstructor package
+        sb.append("import sharedsync.allArgsConstructor.").append(cacheInfo.getEntityName()).append("allArgsConstructor;\n");
         Set<String> collectionImports = new HashSet<>();
         for (RelatedEntity relatedEntity : cacheInfo.getRelatedEntities()) {
             if (relatedEntity.getEntityPath() != null) {
@@ -143,7 +143,7 @@ public class DtoGenerator {
         sb.append(") {\n");
 
         // Use the per-entity factory class (imported above)
-        String factoryName = cacheInfo.getEntityName() + "AllArgsConstructor";
+        String factoryName = cacheInfo.getEntityName() + "allArgsConstructor";
 
         sb.append("        return ").append(factoryName).append(".create(\n");
 

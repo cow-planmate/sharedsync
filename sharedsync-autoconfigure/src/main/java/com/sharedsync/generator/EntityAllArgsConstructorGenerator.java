@@ -14,17 +14,17 @@ import com.sharedsync.generator.Generator.FieldInfo;
  * the entity with all fields set via reflection. Works even if the entity has
  * no constructors (uses Unsafe as fallback).
  */
-public class EntityAllArgsConstructorGenerator {
+public class EntityallArgsConstructorGenerator {
 
     public static void initialize(CacheInformation cacheInfo) {
         // No additional initialization needed for this generator
     }
 
-    private static final String FACTORY_PACKAGE = "sharedsync.AllArgsConstructor";
+    private static final String FACTORY_PACKAGE = "sharedsync.allArgsConstructor";
 
     public static boolean process(CacheInformation cacheInfo, ProcessingEnvironment processingEnv) {
         String className = cacheInfo.getEntityName();
-        String factoryClassName = className + "AllArgsConstructor";
+        String factoryClassName = className + "allArgsConstructor";
         String qualifiedFactory = FACTORY_PACKAGE + "." + factoryClassName;
 
         try {

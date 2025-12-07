@@ -22,7 +22,6 @@ public class SharedEventTracker {
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
         String sessionId = accessor.getSessionId();
         String userId = extractUserId(accessor);
-        // Try reading roomId from CONNECT native headers first (client can send custom header)
         String roomId = accessor.getFirstNativeHeader("roomId");
         if (roomId == null) {
             roomId = parseRoomId(accessor.getDestination());
