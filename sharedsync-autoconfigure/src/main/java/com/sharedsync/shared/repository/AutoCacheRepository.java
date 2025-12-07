@@ -695,28 +695,34 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
         for (int i = 0; i < entityConverterRepositories.length; i++) {
             String repoName = entityConverterRepositories[i];
-            Object repository = applicationContext.getBean(repoName);
             Class<?> paramType = parameterTypes[i];
             Type genericType = genericParameterTypes[i];
 
-            // List 타입인 경우 특별 처리
+            // Determine expected entity class for this converter parameter
+            Class<?> expectedEntityClass = null;
             if (List.class.isAssignableFrom(paramType)) {
-                // List<Tag>와 같은 경우
-                Class<?> elementType = getListElementType(genericType);
+                expectedEntityClass = getListElementType(genericType);
+            } else {
+                expectedEntityClass = paramType;
+            }
+
+            // If we have an expected entity class, use EntityManager to obtain references
+            if (List.class.isAssignableFrom(paramType)) {
+                Class<?> elementType = expectedEntityClass;
                 if (elementType != null) {
-                    // DTO에서 ID 리스트 추출
                     List<?> idList = extractRelatedIdList(dto, elementType);
                     if (idList != null && !idList.isEmpty()) {
-                        // 각 ID에 대해 엔티티 조회
                         List<Object> entities = new ArrayList<>();
                         for (Object id : idList) {
                             try {
-                                Method getReferenceMethod = repository.getClass().getMethod("getReferenceById", Object.class);
-                                Object entityRef = getReferenceMethod.invoke(repository, id);
-                                entities.add(entityRef);
-                            } catch (Exception e) {
-                                // 개별 엔티티 조회 실패 시 건너뛰기
-                            }
+                                    Object normalizedId = changeType((ID) id);
+                                    System.err.println("[SharedSync][DEBUG] resolving list element reference: entity=" + elementType.getSimpleName() + ", id=" + normalizedId);
+                                    Object ref = entityManager.getReference(elementType, normalizedId);
+                                    entities.add(ref);
+                                } catch (Exception e) {
+                                    System.err.println("[SharedSync][DEBUG] failed to resolve list element reference: entity=" + elementType + ", id=" + id + ", err=" + e.getMessage());
+                                    // skip missing/invalid ids
+                                }
                         }
                         params[i] = entities;
                     } else {
@@ -726,16 +732,24 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                     params[i] = new ArrayList<>();
                 }
             } else {
-                // 단일 엔티티인 경우 기존 로직
                 Object relatedId = extractRelatedId(dto, i);
-
                 if (relatedId == null) {
                     params[i] = null;
                 } else {
                     try {
-                        Method getReferenceMethod = repository.getClass().getMethod("getReferenceById", Object.class);
-                        Object entityRef = getReferenceMethod.invoke(repository, relatedId);
-                        params[i] = entityRef;
+                        if (expectedEntityClass != null) {
+                            try {
+                                Object normalized = changeType((ID) relatedId);
+                                System.err.println("[SharedSync][DEBUG] resolving single reference: paramIndex=" + i + ", entity=" + expectedEntityClass.getSimpleName() + ", id=" + normalized);
+                                Object ref = entityManager.getReference(expectedEntityClass, normalized);
+                                params[i] = ref;
+                            } catch (Exception e) {
+                                System.err.println("[SharedSync][DEBUG] failed to resolve single reference: paramIndex=" + i + ", entity=" + expectedEntityClass + ", id=" + relatedId + ", err=" + e.getMessage());
+                                params[i] = null;
+                            }
+                        } else {
+                            params[i] = null;
+                        }
                     } catch (Exception e) {
                         params[i] = null;
                     }
@@ -788,9 +802,21 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         String repoName = entityConverterRepositories[parameterIndex];
 
         try {
-            // Repository에서 엔티티 클래스 타입 가져오기
-            Object repository = applicationContext.getBean(repoName);
-            Class<?> entityClass = getEntityClassFromRepository(repository);
+            // Determine the expected entity class from the converter method parameter
+            Class<?>[] paramTypes = entityConverterMethod.getParameterTypes();
+            Type[] genericParamTypes = entityConverterMethod.getGenericParameterTypes();
+            Class<?> entityClass = null;
+            if (parameterIndex < paramTypes.length) {
+                Class<?> paramType = paramTypes[parameterIndex];
+                if (List.class.isAssignableFrom(paramType)) {
+                    entityClass = getListElementType(genericParamTypes[parameterIndex]);
+                } else {
+                    entityClass = paramType;
+                }
+            }
+
+            // Try to resolve repository bean using provided name or derived name/entity type
+            Object repository = resolveRepositoryBean(repoName, entityClass);
 
             if (entityClass == null) {
                 return null;
@@ -895,6 +921,43 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             }
         } catch (Exception e) {
             // 실패 시 null 반환
+        }
+        return null;
+    }
+
+    /**
+     * Resolve a repository bean from the application context. If the provided
+     * bean name is empty or not found, try deriving a bean name from the
+     * entity class (e.g. `User` -> `userRepository`) or search known beans
+     * for one whose entity type matches `entityClass`.
+     */
+    private Object resolveRepositoryBean(String repoName, Class<?> entityClass) {
+        try {
+            if (repoName != null && !repoName.isBlank()) {
+                if (applicationContext.containsBean(repoName)) {
+                    return applicationContext.getBean(repoName);
+                }
+            }
+
+            // Try derived bean name: decapitalize(entitySimpleName) + "Repository"
+            if (entityClass != null) {
+                String derived = Character.toLowerCase(entityClass.getSimpleName().charAt(0))
+                        + entityClass.getSimpleName().substring(1) + "Repository";
+                if (applicationContext.containsBean(derived)) {
+                    return applicationContext.getBean(derived);
+                }
+            }
+
+            // Last resort: search all beans and match by repository entity generic type
+            Map<String, ?> beans = applicationContext.getBeansOfType(Object.class);
+            for (Object bean : beans.values()) {
+                Class<?> repoEntity = getEntityClassFromRepository(bean);
+                if (repoEntity != null && entityClass != null && repoEntity.equals(entityClass)) {
+                    return bean;
+                }
+            }
+        } catch (Exception ignored) {
+            // ignore and return null below
         }
         return null;
     }
@@ -1397,6 +1460,31 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
 
         // EntityManager로 저장 (persist 또는 merge)
+        // 방어적 검사: 필수 ManyToOne 관계가 null이면 저장을 건너뜀
+        Class<?> entityClazz = getEntityClass();
+        try {
+            for (java.lang.reflect.Field f : entityClazz.getDeclaredFields()) {
+                if (f.isAnnotationPresent(jakarta.persistence.ManyToOne.class)) {
+                    jakarta.persistence.JoinColumn jc = f.getAnnotation(jakarta.persistence.JoinColumn.class);
+                    boolean nullable = true;
+                    if (jc != null) {
+                        nullable = jc.nullable();
+                    }
+                    if (!nullable) {
+                        f.setAccessible(true);
+                        Object val = f.get(entityToSave);
+                        if (val == null) {
+                            System.err.println("[SharedSync][WARN] Required ManyToOne relation is null - skipping DB save: " + entityClazz.getSimpleName() + "." + f.getName());
+                            return dto; // skip saving to avoid FK violation
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // 검사 중 오류 발생시 로그만 남기고 계속 진행
+            System.err.println("[SharedSync][WARN] failed to validate required relations: " + e.getMessage());
+        }
+
         T savedEntity = saveEntity(entityToSave);
 
         DTO updatedDto = convertToDto(savedEntity);
