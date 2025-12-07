@@ -200,6 +200,12 @@ public class DtoGenerator {
         String var = Generator.decapitalizeFirst(entityName);
 
         // declare cached Field and Method variables per relation field
+        // also prepare cache for entity id field
+        String idName = cacheInfo.getIdName();
+        String idUp = idName.toUpperCase();
+        String idType = cacheInfo.getIdType();
+        sb.append("    private static final java.lang.reflect.Field FIELD_").append(idUp).append(";\n");
+
         for (FieldInfo f : collectionFields) {
             String fname = f.getName();
             String up = fname.toUpperCase();
@@ -218,6 +224,9 @@ public class DtoGenerator {
 
         sb.append("\n    static {\n");
         sb.append("        try {\n");
+        // initialize id field cache
+        sb.append("            FIELD_").append(idUp).append(" = ").append(entityName).append(".class.getDeclaredField(\"").append(idName).append("\");\n");
+        sb.append("            FIELD_").append(idUp).append(".setAccessible(true);\n");
 
         // initialize each cached field and method for collection fields
         for (FieldInfo f : collectionFields) {
@@ -261,6 +270,17 @@ public class DtoGenerator {
 
         sb.append("        } catch (Exception e) {\n");
         sb.append("            throw new ExceptionInInitializerError(e);\n");
+        sb.append("        }\n");
+        sb.append("    }\n\n");
+
+        // helper to extract entity id (uses cached FIELD_<ID>)
+        sb.append("    private static ").append(idType).append(" extractId_").append(idUp)
+            .append("(").append(entityName).append(" ").append(var).append(") {\n");
+        sb.append("        try {\n");
+        sb.append("            Object val = FIELD_").append(idUp).append(".get(").append(var).append(");\n");
+        sb.append("            return val == null ? null : (").append(idType).append(") val;\n");
+        sb.append("        } catch (IllegalAccessException ex) {\n");
+        sb.append("            return null;\n");
         sb.append("        }\n");
         sb.append("    }\n\n");
 
@@ -581,15 +601,16 @@ public class DtoGenerator {
         String idName = cacheInfo.getIdName();
 
         sb.append("    public static ").append(cacheInfo.getDtoClassName())
-                .append(" fromEntity(")
-                .append(cacheInfo.getEntityName())
-                .append(" ")
-                .append(var)
-                .append(") {\n");
+            .append(" fromEntity(")
+            .append(cacheInfo.getEntityName())
+            .append(" ")
+            .append(var)
+            .append(") {\n");
 
         sb.append("        return new ").append(cacheInfo.getDtoClassName()).append("(\n");
-        sb.append("                ").append(var).append(".get")
-                .append(Generator.capitalizeFirst(idName)).append("(),\n");
+        String idUp = idName.toUpperCase();
+        sb.append("                ");
+        sb.append("extractId_").append(idUp).append("(").append(var).append("),\n");
 
         for (FieldInfo field : cacheInfo.getEntityFields()) {
 
