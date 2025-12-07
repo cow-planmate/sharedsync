@@ -26,7 +26,7 @@ public class DtoGenerator {
     public static boolean process(CacheInformation cacheInfo, ProcessingEnvironment processingEnv) {
 
         String source =
-            "package " + cacheInfo.getDtoPath() + "\n"
+            "package " + cacheInfo.getDtoPath() + ";\n"
                 + "import com.sharedsync.shared.annotation.*;\n"
                 + "import com.sharedsync.shared.dto.CacheDto;\n"
                 + writeEntityPath(cacheInfo)
@@ -75,6 +75,8 @@ public class DtoGenerator {
         if (cacheInfo.getEntityPath() != null) {
             sb.append("import ").append(cacheInfo.getEntityPath()).append(";\n");
         }
+        // Import the AllArgsConstructor factory from sharedsync package
+        sb.append("import sharedsync.").append(cacheInfo.getEntityName()).append("AllArgsConstructor;\n");
         Set<String> collectionImports = new HashSet<>();
         for (RelatedEntity relatedEntity : cacheInfo.getRelatedEntities()) {
             if (relatedEntity.getEntityPath() != null) {
@@ -137,15 +139,10 @@ public class DtoGenerator {
 
         sb.append(") {\n");
 
-        // determine factory qualified name
-        String entityPath = cacheInfo.getEntityPath();
-        String pkg = "";
-        if (entityPath != null && entityPath.contains(".")) {
-            pkg = entityPath.substring(0, entityPath.lastIndexOf('.'));
-        }
-        String factoryQualified = pkg.isEmpty() ? cacheInfo.getEntityName() + "AllArgsConstructor" : pkg + "." + cacheInfo.getEntityName() + "AllArgsConstructor";
+        // Use the factory from sharedsync package (already imported)
+        String factoryName = cacheInfo.getEntityName() + "AllArgsConstructor";
 
-        sb.append("        return ").append(factoryQualified).append(".create(\n");
+        sb.append("        return ").append(factoryName).append(".create(\n");
 
         for (FieldInfo field : fields) {
 

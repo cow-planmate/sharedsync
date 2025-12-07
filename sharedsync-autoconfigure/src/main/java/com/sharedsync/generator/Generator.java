@@ -337,6 +337,7 @@ public class Generator extends AbstractProcessor {
             initialize(cacheInfo);
 
             // 실제 파일 생성기 호출
+            EntityAllArgsConstructorGenerator.process(cacheInfo, processingEnv);
             CacheEntityGenerator.process(cacheInfo, processingEnv);
             DtoGenerator.process(cacheInfo, processingEnv);
             WebsocketDtoGenerator.process(cacheInfo, processingEnv);
@@ -351,6 +352,7 @@ public class Generator extends AbstractProcessor {
     // Generator 초기화
     // ================================
     public static void initialize(CacheInformation cacheInfo) {
+        EntityAllArgsConstructorGenerator.initialize(cacheInfo);
         CacheEntityGenerator.initialize(cacheInfo);
         DtoGenerator.initialize(cacheInfo);
         WebsocketDtoGenerator.initialize(cacheInfo);

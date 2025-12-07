@@ -86,13 +86,24 @@ public class CacheEntityProcessor extends AbstractProcessor {
             w.write(params.toString());
             w.write(") {\n");
 
-            // instantiate
-            w.write("        " + className + " instance = new " + className + "();\n");
-
-            // set fields via reflection to avoid requiring setters
+            // instantiate without requiring a no-arg constructor (using Unsafe)
+            w.write("        " + className + " instance;\n");
             w.write("        try {\n");
+            w.write("            // Try no-arg constructor first (handles private/protected too)\n");
+            w.write("            try {\n");
+            w.write("                java.lang.reflect.Constructor<" + className + "> ctor = " + className + ".class.getDeclaredConstructor();\n");
+            w.write("                ctor.setAccessible(true);\n");
+            w.write("                instance = ctor.newInstance();\n");
+            w.write("            } catch (NoSuchMethodException e) {\n");
+            w.write("                // No no-arg constructor: use Unsafe to allocate without calling constructor\n");
+            w.write("                java.lang.reflect.Field unsafeField = sun.misc.Unsafe.class.getDeclaredField(\"theUnsafe\");\n");
+            w.write("                unsafeField.setAccessible(true);\n");
+            w.write("                sun.misc.Unsafe unsafe = (sun.misc.Unsafe) unsafeField.get(null);\n");
+            w.write("                instance = (" + className + ") unsafe.allocateInstance(" + className + ".class);\n");
+            w.write("            }\n");
+            w.write("\n");
+            w.write("            // set fields via reflection\n");
             for (VariableElement f : fields) {
-                String t = f.asType().toString();
                 String n = f.getSimpleName().toString();
                 w.write("            java.lang.reflect.Field f_" + n + " = " + className + ".class.getDeclaredField(\"" + n + "\");\n");
                 w.write("            f_" + n + ".setAccessible(true);\n");

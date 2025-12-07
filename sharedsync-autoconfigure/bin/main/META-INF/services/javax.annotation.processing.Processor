@@ -1,3 +1,2 @@
-com.sharedsync.shared.processor.CacheEntityProcessor
 com.sharedsync.generator.Generator
 com.sharedsync.generator.PresenceUserGenerator
