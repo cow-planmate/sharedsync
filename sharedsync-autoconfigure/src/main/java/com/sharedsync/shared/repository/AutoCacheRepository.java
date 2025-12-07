@@ -689,6 +689,17 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     private Object[] buildEntityConverterParameters(DTO dto) throws Exception {
+        // DTO 전체 내용 출력 (디버그용)
+        System.err.println("[SharedSync][DEBUG] buildEntityConverterParameters for DTO: " + dtoClass.getSimpleName());
+        for (Field field : dtoFields) {
+            try {
+                Object value = field.get(dto);
+                System.err.println("[SharedSync][DEBUG]   " + field.getName() + " = " + value);
+            } catch (Exception e) {
+                // ignore
+            }
+        }
+        
         Object[] params = new Object[entityConverterRepositories.length];
         Class<?>[] parameterTypes = entityConverterMethod.getParameterTypes();
         Type[] genericParameterTypes = entityConverterMethod.getGenericParameterTypes();
