@@ -186,13 +186,19 @@ public class DtoGenerator {
 
         // collect fields that need reflection helpers: ManyToOne (single id) and collection relations
         List<FieldInfo> collectionFields = fields.stream()
-                .filter(f -> f.isOneToMany() || f.isManyToMany())
-                .toList();
+            .filter(f -> f.isOneToMany() || f.isManyToMany())
+            .toList();
 
         List<FieldInfo> manyToOneFields = fields.stream()
-                .filter(f -> f.isManyToOne())
-                .filter(f -> cacheInfo.getRelatedEntities().stream().anyMatch(re -> isSameEntity(f, re)))
-                .toList();
+            .filter(f -> f.isManyToOne())
+            .filter(f -> cacheInfo.getRelatedEntities().stream().anyMatch(re -> isSameEntity(f, re)))
+            .toList();
+
+        // simple fields (no relation, not id) — generate reflection helpers so DTO generation works even without getters
+        List<FieldInfo> simpleFields = fields.stream()
+            .filter(f -> !f.isOneToMany() && !f.isManyToMany() && !f.isManyToOne())
+            .filter(f -> !f.getName().equals(cacheInfo.getIdName()))
+            .toList();
 
         if (collectionFields.isEmpty() && manyToOneFields.isEmpty()) return "";
 
@@ -205,6 +211,13 @@ public class DtoGenerator {
         String idUp = idName.toUpperCase();
         String idType = cacheInfo.getIdType();
         sb.append("    private static final java.lang.reflect.Field FIELD_").append(idUp).append(";\n");
+
+        // declare cached Field variables for simple fields so we can access them via reflection if getters are absent
+        for (FieldInfo f : simpleFields) {
+            String fname = f.getName();
+            String up = fname.toUpperCase();
+            sb.append("    private static final java.lang.reflect.Field FIELD_").append(up).append(";\n");
+        }
 
         for (FieldInfo f : collectionFields) {
             String fname = f.getName();
@@ -227,6 +240,14 @@ public class DtoGenerator {
         // initialize id field cache
         sb.append("            FIELD_").append(idUp).append(" = ").append(entityName).append(".class.getDeclaredField(\"").append(idName).append("\");\n");
         sb.append("            FIELD_").append(idUp).append(".setAccessible(true);\n");
+
+        // initialize simple field cache
+        for (FieldInfo f : simpleFields) {
+            String fname = f.getName();
+            String up = fname.toUpperCase();
+            sb.append("            FIELD_").append(up).append(" = ").append(entityName).append(".class.getDeclaredField(\"").append(fname).append("\");\n");
+            sb.append("            FIELD_").append(up).append(".setAccessible(true);\n");
+        }
 
         // initialize each cached field and method for collection fields
         for (FieldInfo f : collectionFields) {
@@ -336,7 +357,7 @@ public class DtoGenerator {
             sb.append("                java.lang.reflect.Method directGetter = ").append(entityName).append(".class.getMethod(\"get").append(Generator.capitalizeFirst(fname)).append("Id\");\n");
             sb.append("                Object directVal = directGetter.invoke(").append(var).append(");\n");
             sb.append("                return directVal == null ? null : (").append(elemIdType).append(") directVal;\n");
-            sb.append("            } catch (NoSuchMethodException ignored) {\n");
+            sb.append("            } catch (Exception ignored) {\n");
             sb.append("                // fall back to field/method based extraction\n");
             sb.append("            }\n");
             sb.append("            if (!jakarta.persistence.Persistence.getPersistenceUtil().isLoaded(").append(var).append(", \"").append(fname).append("\")) {\n");
@@ -349,6 +370,29 @@ public class DtoGenerator {
             sb.append("                return idObj == null ? null : (").append(elemIdType).append(") idObj;\n");
             sb.append("            } catch (Exception ex) {\n");
             sb.append("                return null;\n");
+            sb.append("            }\n");
+            sb.append("        } catch (IllegalAccessException ex) {\n");
+            sb.append("            return null;\n");
+            sb.append("        }\n");
+            sb.append("    }\n\n");
+        }
+
+        // generate simple field extractors for fields without relation/getter
+        for (FieldInfo f : simpleFields) {
+            String fname = f.getName();
+            String up = fname.toUpperCase();
+            String dtoFieldType = Generator.denormalizeType(f.getType(), f.getOriginalType());
+
+            sb.append("    private static ").append(dtoFieldType).append(" extractField_").append(up)
+                .append("(").append(entityName).append(" ").append(var).append(") {\n");
+            sb.append("        try {\n");
+            sb.append("            try {\n");
+            sb.append("                java.lang.reflect.Method getter = ").append(entityName).append(".class.getMethod(\"get").append(Generator.capitalizeFirst(fname)).append("\");\n");
+            sb.append("                Object val = getter.invoke(").append(var).append(");\n");
+            sb.append("                return val == null ? null : (").append(dtoFieldType).append(") val;\n");
+            sb.append("            } catch (Exception ignored) {\n");
+            sb.append("                Object val = FIELD_").append(up).append(".get(").append(var).append(");\n");
+            sb.append("                return val == null ? null : (").append(dtoFieldType).append(") val;\n");
             sb.append("            }\n");
             sb.append("        } catch (IllegalAccessException ex) {\n");
             sb.append("            return null;\n");
@@ -648,25 +692,11 @@ public class DtoGenerator {
                 }
             }
 
-                boolean isBoolean =
-                    "boolean".equals(field.getOriginalType()) || "Boolean".equals(field.getType()) || "java.lang.Boolean".equals(field.getType());
-
-            boolean nameStartsWithIs = field.getName().startsWith("is")
-                    && field.getName().length() > 2
-                    && Character.isUpperCase(field.getName().charAt(2));
-
-            String prefix;
-            if (nameStartsWithIs) {
-                // field already starts with 'is' (e.g. isDeleted) -> use getIsDeleted() to match Lombok/JavaBean for such fields
-                prefix = "get";
-            } else {
-                prefix = isBoolean ? "is" : "get";
-            }
-
-            sb.append("                ")
-                    .append(var).append(".")
-                    .append(prefix).append(Generator.capitalizeFirst(field.getName()))
-                    .append("(),\n");
+                // Use reflection-safe extractor so DTO generation works even when entity getter is absent
+                String up = field.getName().toUpperCase();
+                sb.append("                ")
+                        .append("extractField_").append(up).append("(").append(var).append(")")
+                        .append(",\n");
         }
 
         sb.setLength(sb.length() - 2);
