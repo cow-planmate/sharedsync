@@ -200,7 +200,12 @@ public class DtoGenerator {
             .filter(f -> !f.getName().equals(cacheInfo.getIdName()))
             .toList();
 
-        if (collectionFields.isEmpty() && manyToOneFields.isEmpty()) return "";
+        // Only skip generating reflection helpers when there are absolutely no
+        // fields that require helper generation (no collections, no many-to-one,
+        // and no simple fields). Previously simple fields were neglected when
+        // there were no relations which caused calls to extractField_* to be
+        // emitted without corresponding helper methods.
+        if (collectionFields.isEmpty() && manyToOneFields.isEmpty() && simpleFields.isEmpty()) return "";
 
         String entityName = cacheInfo.getEntityName();
         String var = Generator.decapitalizeFirst(entityName);
