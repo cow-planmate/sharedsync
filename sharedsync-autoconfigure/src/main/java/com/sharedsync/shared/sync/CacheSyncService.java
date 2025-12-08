@@ -70,5 +70,7 @@ public class CacheSyncService {
 
             persistentIds.forEach(childId -> syncRecursively(childRepo, childId));
         }
+        // 동기화가 끝난 항목의 캐시를 제거합니다 (하위 항목은 재귀적으로 먼저 제거됨)
+        repository.deleteCacheByIdUnchecked(id);
     }
 }
