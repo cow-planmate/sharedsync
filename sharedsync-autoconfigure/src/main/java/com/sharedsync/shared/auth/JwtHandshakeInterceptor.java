@@ -25,6 +25,7 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
 
         // 🚀 데모 모드: 인증 완전 비활성화
         if (!authProperties.isEnabled()) {
+            attributes.put("userId", tokenResolver.extractPrincipalId("token"));
             return true;
         }
 
