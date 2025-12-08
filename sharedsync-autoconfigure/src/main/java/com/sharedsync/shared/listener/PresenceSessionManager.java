@@ -1,5 +1,6 @@
 package com.sharedsync.shared.listener;
 
+import com.sharedsync.shared.properties.SharedSyncAuthProperties;
 import org.springframework.stereotype.Service;
 
 import com.sharedsync.shared.presence.core.PresenceBroadcaster;
@@ -9,6 +10,9 @@ import com.sharedsync.shared.presence.storage.PresenceStorage;
 import com.sharedsync.shared.sync.CacheSyncService;
 
 import lombok.RequiredArgsConstructor;
+
+import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -24,11 +28,16 @@ public class PresenceSessionManager {
     private final CacheInitializer cacheInitializer;
     private final CacheSyncService cacheSyncService;
     private final PresenceRootResolver presenceRootResolver;
+    private final SharedSyncAuthProperties authProperties;
 
     /**
      * 연결 시 (입장)
      */
     public void handleConnect(String rootId, String userId, String sessionId) {
+        if (!authProperties.isEnabled()) {
+            userId = "ws-" + sessionId;
+        }
+
         if (!presenceStorage.hasTracker(rootId)) {
             cacheInitializer.initializeHierarchy(rootId);
         }
@@ -49,10 +58,9 @@ public class PresenceSessionManager {
                 channel,
                 rootId,
                 ACTION_CREATE,
-                new Object() {
-                    public final String userNickname = finalNickname;
-                    public final String uid = userId;
-                }
+                userId,
+                finalNickname,
+                buildUserList(rootId)
         );
     }
 
@@ -61,6 +69,10 @@ public class PresenceSessionManager {
      * 연결 해제 시 (퇴장)
      */
     public void handleDisconnect(String userId, String sessionId) {
+        if (!authProperties.isEnabled()) {
+            userId = "ws-" + sessionId;
+        }
+
         String rootId = presenceStorage.removeUserRootMapping(userId);
         if (rootId == null || rootId.isBlank()) return;
 
@@ -77,11 +89,20 @@ public class PresenceSessionManager {
                 channel,
                 rootId,
                 ACTION_DELETE,
-                new Object() {
-                    public final String userNickname = nickname;
-                    public final String uid = userId;
-                }
+                userId,
+                nickname,
+                buildUserList(rootId)
         );
+    }
+
+    private List<Map<String, String>> buildUserList(String rootId) {
+        return presenceStorage.getUserIdsInRoom(rootId)
+                .stream()
+                .map(id -> Map.of(
+                        "uid", id,
+                        "userNickname", presenceStorage.getNicknameByUserId(id)
+                ))
+                .toList();
     }
 
 }
