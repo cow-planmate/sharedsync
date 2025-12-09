@@ -10,7 +10,7 @@ import com.sharedsync.shared.service.SharedService;
 import lombok.RequiredArgsConstructor;
 
 @RequiredArgsConstructor
-public abstract class SharedContoller <req extends WRequest, res extends WResponse, T extends SharedService<req, res>> {
+public abstract class SharedController <req extends WRequest, res extends WResponse, T extends SharedService<req, res>> {
     protected final T service;
 
     // Reusable handlers for children to call in their annotated endpoints
