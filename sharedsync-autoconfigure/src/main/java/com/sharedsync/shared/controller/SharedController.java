@@ -13,7 +13,6 @@ import lombok.RequiredArgsConstructor;
 public abstract class SharedController <req extends WRequest, res extends WResponse, T extends SharedService<req, res>> {
     protected final T service;
 
-    // Reusable handlers for children to call in their annotated endpoints
     protected res handleCreate(@DestinationVariable int rootEntityId, @Payload req request) {
         res response = service.create(request);
         response.setEventId(request.getEventId() == null ? "" : request.getEventId());
