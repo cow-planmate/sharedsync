@@ -543,9 +543,87 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     @SuppressWarnings("unchecked")
     private T loadEntityByIdCriteria(ID id) {
         Class<T> entityClass = getEntityClass();
-        
-        // EntityManager.find() 사용 - 가장 효율적
-        return entityManager.find(entityClass, id);
+
+        // Try to load entity with necessary relations eager-fetched (left join fetch)
+        // based on DTO cache fields like `cacheUserId` -> relation `user`.
+        if (entityManager == null) {
+            return null;
+        }
+
+        try {
+            List<String> relationsToFetch = new ArrayList<>();
+
+            for (Field dtoField : dtoFields) {
+                String dtoFieldName = dtoField.getName();
+                if (dtoFieldName == null) continue;
+                if (dtoFieldName.startsWith("cache") && dtoFieldName.endsWith("Id") && dtoFieldName.length() > 7) {
+                    String entitySimple = dtoFieldName.substring(5, dtoFieldName.length() - 2); // e.g. "User"
+                    if (entitySimple.isEmpty()) continue;
+                    String candidate = Character.toLowerCase(entitySimple.charAt(0)) + entitySimple.substring(1);
+
+                    // 예상되는 DB 컬럼명(스네이크 + _id) 예: TransportationCategory -> transportation_category_id
+                    String expectedJoinColumn = toSnakeCase(entitySimple) + "_id";
+
+                    for (Field f : getAllFieldsInHierarchy(entityClass)) {
+                        String relationName = null;
+
+                        // 1) 필드명 또는 필드 타입으로 매칭
+                        if (f.getName().equals(candidate) || f.getType().getSimpleName().equals(entitySimple)) {
+                            relationName = f.getName();
+                        }
+
+                        // 2) @JoinColumn(name = "...")가 있으면 컬럼명으로 매칭
+                        try {
+                            jakarta.persistence.JoinColumn jc = f.getAnnotation(jakarta.persistence.JoinColumn.class);
+                            if (jc != null) {
+                                String jcName = jc.name();
+                                if (jcName != null && !jcName.isBlank()) {
+                                    if (jcName.equalsIgnoreCase(expectedJoinColumn)) {
+                                        relationName = f.getName();
+                                    }
+                                }
+                            }
+                        } catch (Exception ignored) {
+                            // ignore reflection issues
+                        }
+
+                        if (relationName != null) {
+                            if (!relationsToFetch.contains(relationName)) relationsToFetch.add(relationName);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+            CriteriaQuery<T> query = (CriteriaQuery<T>) cb.createQuery(entityClass);
+            Root<T> root = (Root<T>) query.from(entityClass);
+
+            // add fetch joins
+            java.util.Set<String> uniq = new java.util.LinkedHashSet<>(relationsToFetch);
+            for (String rel : uniq) {
+                try {
+                    root.fetch(rel, jakarta.persistence.criteria.JoinType.LEFT);
+                } catch (IllegalArgumentException ignored) {
+                    // ignore invalid relation names
+                }
+            }
+
+            query.select(root).where(cb.equal(root.get(entityIdField.getName()), id));
+
+            try {
+                return entityManager.createQuery(query).getSingleResult();
+            } catch (jakarta.persistence.NoResultException nre) {
+                return null;
+            }
+        } catch (Exception e) {
+            // Fallback to simple find() if anything goes wrong
+            try {
+                return entityManager.find(entityClass, id);
+            } catch (Exception ex) {
+                return null;
+            }
+        }
     }
 
     @Override
@@ -596,6 +674,32 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             return (ID) Long.valueOf(id.toString());
         }
         return null;
+    }
+
+    /**
+     * Convert arbitrary id value to the requested target type (entity id field type).
+     * Supports String, Integer/int, Long/long, Short, Byte, UUID.
+     */
+    private Object convertIdToType(Class<?> targetType, Object idValue) {
+        if (idValue == null) return null;
+        if (targetType == null) return idValue;
+
+        // already correct type
+        if (targetType.isInstance(idValue)) return idValue;
+
+        String s = idValue.toString();
+        try {
+            if (targetType == String.class) return s;
+            if (targetType == Integer.class || targetType == int.class) return Integer.valueOf(s);
+            if (targetType == Long.class || targetType == long.class) return Long.valueOf(s);
+            if (targetType == Short.class || targetType == short.class) return Short.valueOf(s);
+            if (targetType == Byte.class || targetType == byte.class) return Byte.valueOf(s);
+            if (targetType == java.util.UUID.class) return java.util.UUID.fromString(s);
+        } catch (Exception e) {
+            // fall through to return original value below
+            System.err.println("[SharedSync][DEBUG] convertIdToType failed to convert '" + s + "' to " + targetType + ": " + e.getMessage());
+        }
+        return idValue;
     }
 
     /**
@@ -909,8 +1013,11 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                     try {
                         if (expectedEntityClass != null) {
                             try {
-                                Object normalized = changeType((ID) relatedId);
-                                System.err.println("[SharedSync][DEBUG] resolving single reference: paramIndex=" + i + ", entity=" + expectedEntityClass.getSimpleName() + ", id=" + normalized);
+                                // Find id field type for the expected entity and convert accordingly
+                                Field relatedIdField = locateEntityIdField(expectedEntityClass);
+                                Class<?> relatedIdType = relatedIdField != null ? relatedIdField.getType() : null;
+                                Object normalized = convertIdToType(relatedIdType, relatedId);
+                                System.err.println("[SharedSync][DEBUG] resolving single reference: paramIndex=" + i + ", entity=" + expectedEntityClass.getSimpleName() + ", id=" + normalized + " (targetIdType=" + relatedIdType + ")");
                                 Object ref = entityManager.getReference(expectedEntityClass, normalized);
                                 params[i] = ref;
                             } catch (Exception e) {
@@ -1058,6 +1165,26 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             current = current.getSuperclass();
         }
         return fields;
+    }
+
+    /**
+     * CamelCase (PascalCase) -> snake_case 변환
+     * 예: TransportationCategory -> transportation_category
+     */
+    private String toSnakeCase(String input) {
+        if (input == null || input.isEmpty()) return input;
+        StringBuilder sb = new StringBuilder();
+        char[] chars = input.toCharArray();
+        for (int i = 0; i < chars.length; i++) {
+            char c = chars[i];
+            if (Character.isUpperCase(c)) {
+                if (i > 0) sb.append('_');
+                sb.append(Character.toLowerCase(c));
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /**
