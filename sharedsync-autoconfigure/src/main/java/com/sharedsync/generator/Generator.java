@@ -8,7 +8,6 @@ import javax.annotation.processing.AbstractProcessor;
 import javax.annotation.processing.RoundEnvironment;
 import javax.annotation.processing.SupportedAnnotationTypes;
 import javax.annotation.processing.SupportedSourceVersion;
-import javax.annotation.processing.ProcessingEnvironment;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.TypeElement;
@@ -241,7 +240,7 @@ public class Generator extends AbstractProcessor {
                                 related.setEntityIdName(rf.getSimpleName().toString());
                                 related.setEntityIdType(normalizeType(rf.asType().toString()));
                                 related.setEntityIdOriginalType(rf.asType().toString());
-                                related.setCacheEntityIdName("cache" + related.getEntityIdName() + "Id");
+                                related.setCacheEntityIdName("cache" + Generator.capitalizeFirst(related.getEntityIdName()));
                                 break;
                             }
                         }
