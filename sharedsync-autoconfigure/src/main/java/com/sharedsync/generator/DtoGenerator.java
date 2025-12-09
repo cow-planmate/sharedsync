@@ -218,12 +218,13 @@ public class DtoGenerator {
         sb.append("    private static final java.lang.reflect.Field FIELD_").append(idUp).append(";\n");
 
         // declare cached Field variables for simple fields so we can access them via reflection if getters are absent
-        for (FieldInfo f : simpleFields) {
-            String fname = f.getName();
-            String up = fname.toUpperCase();
-            sb.append("    private static final java.lang.reflect.Field FIELD_").append(up).append(";\n");
-        }
+            for (FieldInfo f : simpleFields) {
+                String fname = f.getName();
+                String up = fname.toUpperCase();
+                sb.append("    private static final java.lang.reflect.Field FIELD_").append(up).append(";\n");
+            }
 
+            // simple field extractors are generated later with primitive-safe defaults
         for (FieldInfo f : collectionFields) {
             String fname = f.getName();
             String up = fname.toUpperCase();
@@ -388,19 +389,81 @@ public class DtoGenerator {
             String up = fname.toUpperCase();
             String dtoFieldType = Generator.denormalizeType(f.getType(), f.getOriginalType());
 
+            // determine whether the DTO field is a primitive type so we can emit safe defaults
+            boolean isPrimitive = dtoFieldType.equals("int") || dtoFieldType.equals("long") || dtoFieldType.equals("float")
+                    || dtoFieldType.equals("double") || dtoFieldType.equals("short") || dtoFieldType.equals("byte")
+                    || dtoFieldType.equals("boolean") || dtoFieldType.equals("char");
+
+            String getterReturn;
+            String fieldReturn;
+            String exceptionReturn;
+
+            if (isPrimitive) {
+                switch (dtoFieldType) {
+                    case "int":
+                        getterReturn = "return val == null ? 0 : ((Number) val).intValue();";
+                        fieldReturn = getterReturn;
+                        exceptionReturn = "return 0;";
+                        break;
+                    case "long":
+                        getterReturn = "return val == null ? 0L : ((Number) val).longValue();";
+                        fieldReturn = getterReturn;
+                        exceptionReturn = "return 0L;";
+                        break;
+                    case "float":
+                        getterReturn = "return val == null ? 0.0f : ((Number) val).floatValue();";
+                        fieldReturn = getterReturn;
+                        exceptionReturn = "return 0.0f;";
+                        break;
+                    case "double":
+                        getterReturn = "return val == null ? 0.0d : ((Number) val).doubleValue();";
+                        fieldReturn = getterReturn;
+                        exceptionReturn = "return 0.0d;";
+                        break;
+                    case "short":
+                        getterReturn = "return val == null ? (short)0 : ((Number) val).shortValue();";
+                        fieldReturn = getterReturn;
+                        exceptionReturn = "return (short)0;";
+                        break;
+                    case "byte":
+                        getterReturn = "return val == null ? (byte)0 : ((Number) val).byteValue();";
+                        fieldReturn = getterReturn;
+                        exceptionReturn = "return (byte)0;";
+                        break;
+                    case "boolean":
+                        getterReturn = "return val == null ? false : ((Boolean) val).booleanValue();";
+                        fieldReturn = getterReturn;
+                        exceptionReturn = "return false;";
+                        break;
+                    case "char":
+                        getterReturn = "return val == null ? '\\u0000' : ((Character) val).charValue();";
+                        fieldReturn = getterReturn;
+                        exceptionReturn = "return '\\u0000';";
+                        break;
+                    default:
+                        getterReturn = "return val == null ? null : (" + dtoFieldType + ") val;";
+                        fieldReturn = getterReturn;
+                        exceptionReturn = "return null;";
+                }
+            } else {
+                getterReturn = "return val == null ? null : (" + dtoFieldType + ") val;";
+                fieldReturn = getterReturn;
+                exceptionReturn = "return null;";
+            }
+
             sb.append("    private static ").append(dtoFieldType).append(" extractField_").append(up)
                 .append("(").append(entityName).append(" ").append(var).append(") {\n");
             sb.append("        try {\n");
             sb.append("            try {\n");
             sb.append("                java.lang.reflect.Method getter = ").append(entityName).append(".class.getMethod(\"get").append(Generator.capitalizeFirst(fname)).append("\");\n");
             sb.append("                Object val = getter.invoke(").append(var).append(");\n");
-            sb.append("                return val == null ? null : (").append(dtoFieldType).append(") val;\n");
+            sb.append("                ").append(getterReturn).append("\n");
             sb.append("            } catch (Exception ignored) {\n");
             sb.append("                Object val = FIELD_").append(up).append(".get(").append(var).append(");\n");
-            sb.append("                return val == null ? null : (").append(dtoFieldType).append(") val;\n");
+            sb.append("                ").append(fieldReturn).append("\n");
             sb.append("            }\n");
             sb.append("        } catch (IllegalAccessException ex) {\n");
-            sb.append("            return null;\n");
+            sb.append("            ").append(exceptionReturn).append("\n");
             sb.append("        }\n");
             sb.append("    }\n\n");
         }
