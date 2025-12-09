@@ -1,4 +1,4 @@
-package com.sharedsync.shared.contoller;
+package com.sharedsync.shared.controller;
 
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.Payload;

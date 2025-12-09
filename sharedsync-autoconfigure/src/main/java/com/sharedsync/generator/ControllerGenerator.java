@@ -30,7 +30,7 @@ public class ControllerGenerator {
 		source.append("import org.springframework.stereotype.Controller;\n\n");
 
 		// Shared Controller import
-		source.append("import com.sharedsync.shared.contoller.SharedContoller;\n\n");
+		source.append("import com.sharedsync.shared.controller.SharedController;\n\n");
 
 		// Request/Response import
 		source.append("import ").append(cacheInfo.getRequestPath()).append(".")
@@ -45,7 +45,7 @@ public class ControllerGenerator {
 		// 클래스 선언
 		source.append("@Controller\n");
 		source.append("public class ").append(cacheInfo.getControllerClassName())
-				.append(" extends SharedContoller<")
+				.append(" extends SharedController<")
 				.append(cacheInfo.getRequestClassName()).append(", ")
 				.append(cacheInfo.getResponseClassName()).append(", ")
 				.append(cacheInfo.getServiceClassName()).append("> {\n\n");
