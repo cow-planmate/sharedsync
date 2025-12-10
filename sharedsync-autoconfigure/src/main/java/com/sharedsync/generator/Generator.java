@@ -23,6 +23,8 @@ import lombok.Setter;
 public class Generator extends AbstractProcessor {
 
     List<CacheInformation> cacheInfoList;
+    private static boolean presenceControllerGenerated = false;
+
 
     public Generator() {
         cacheInfoList = new ArrayList<>();
@@ -215,14 +217,14 @@ public class Generator extends AbstractProcessor {
 
                 // ManyToOne 연관 엔티티 처리, OneToMany 연관 엔티티 처리, ManyToMany 연관 엔티티 처리
                 if (field.getAnnotation(jakarta.persistence.ManyToOne.class) != null ||
-                    field.getAnnotation(jakarta.persistence.OneToMany.class) != null ||
-                    field.getAnnotation(jakarta.persistence.ManyToMany.class) != null) {
+                        field.getAnnotation(jakarta.persistence.OneToMany.class) != null ||
+                        field.getAnnotation(jakarta.persistence.ManyToMany.class) != null) {
                     RelatedEntity related = new RelatedEntity();
                     if(field.getAnnotation(jakarta.persistence.ManyToOne.class) != null){
                         related.setEntityPath(field.asType().toString());
                     }
                     if(field.getAnnotation(jakarta.persistence.OneToMany.class) != null ||
-                       field.getAnnotation(jakarta.persistence.ManyToMany.class) != null){
+                            field.getAnnotation(jakarta.persistence.ManyToMany.class) != null){
                         // OneToMany/ManyToMany 컬렉션 타입 처리
                         if (field.asType() instanceof DeclaredType declaredType) {
                             List<? extends javax.lang.model.type.TypeMirror> typeArgs = declaredType.getTypeArguments();
@@ -235,11 +237,11 @@ public class Generator extends AbstractProcessor {
                             related.setEntityPath("java.lang.Object"); // 기본값 처리
                         }
                     }
-                    
-                
+
+
                     String relatedEntityName = removePath(field.asType().toString());
                     if(field.getAnnotation(jakarta.persistence.OneToMany.class) != null ||
-                       field.getAnnotation(jakarta.persistence.ManyToMany.class) != null){
+                            field.getAnnotation(jakarta.persistence.ManyToMany.class) != null){
                         relatedEntityName = relatedEntityName.replace(">", "");
                     }
                     //
@@ -252,7 +254,7 @@ public class Generator extends AbstractProcessor {
                             targetDeclared = dt;
                         }
                     } else if (field.getAnnotation(jakarta.persistence.OneToMany.class) != null ||
-                               field.getAnnotation(jakarta.persistence.ManyToMany.class) != null) {
+                            field.getAnnotation(jakarta.persistence.ManyToMany.class) != null) {
                         if (field.asType() instanceof DeclaredType dt) {
                             List<? extends javax.lang.model.type.TypeMirror> typeArgs = dt.getTypeArguments();
                             if (!typeArgs.isEmpty() && typeArgs.get(0) instanceof DeclaredType elemDt) {
@@ -344,8 +346,14 @@ public class Generator extends AbstractProcessor {
             ServiceGenerator.process(cacheInfo, processingEnv);
             // Generate per-entity allArgsConstructor factory class under package sharedsync.allArgsConstructor
             EntityAllArgsConstructorGenerator.process(cacheInfo, processingEnv);
+            // ⭐ PresenceController는 단 1회만 생성
+            if (!presenceControllerGenerated) {
+                PresenceControllerGenerator.generate(processingEnv);
+                presenceControllerGenerated = true;
+            }
+
         }
-        
+
         return false;
     }
 
