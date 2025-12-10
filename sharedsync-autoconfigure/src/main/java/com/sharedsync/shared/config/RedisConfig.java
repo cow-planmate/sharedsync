@@ -31,6 +31,8 @@ import com.fasterxml.jackson.databind.jsontype.impl.LaissezFaireSubTypeValidator
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.sharedsync.shared.annotation.Cache;
 import com.sharedsync.shared.dto.CacheDto;
+import com.sharedsync.shared.repository.CacheStore;
+import com.sharedsync.shared.repository.RedisCacheStore;
 
 /**
  * Redis 캐시 설정.
@@ -96,6 +98,21 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
         configureSerializers(template);
         template.afterPropertiesSet();
         return template;
+    }
+
+    /**
+     * Redis 기반 globalCacheStore 빈 등록
+     * AutoCacheRepository에서 getCacheStore()가 이 빈을 우선적으로 사용합니다.
+     */
+    @Bean(name = "globalCacheStore")
+    @SuppressWarnings("rawtypes")
+    public CacheStore redisCacheStore(RedisConnectionFactory connectionFactory, GenericJackson2JsonRedisSerializer serializer) {
+        RedisTemplate<String, Object> template = new RedisTemplate<>();
+        template.setConnectionFactory(connectionFactory);
+        configureSerializers(template, serializer);
+        template.afterPropertiesSet();
+        System.out.println("[SharedSync] Using Redis cache store");
+        return new RedisCacheStore<>(template);
     }
 
 
