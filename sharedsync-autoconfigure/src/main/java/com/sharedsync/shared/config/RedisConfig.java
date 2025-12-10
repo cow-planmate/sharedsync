@@ -12,6 +12,7 @@ import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.BeanDefinitionRegistryPostProcessor;
 import org.springframework.beans.factory.support.GenericBeanDefinition;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
@@ -31,8 +32,14 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.sharedsync.shared.annotation.Cache;
 import com.sharedsync.shared.dto.CacheDto;
 
+/**
+ * Redis 캐시 설정.
+ * sharedsync.cache.type=redis 일 때만 활성화됩니다.
+ * 기본값은 인메모리 캐시를 사용합니다.
+ */
 @EnableCaching
 @Configuration
+@ConditionalOnProperty(name = "sharedsync.cache.type", havingValue = "redis")
 public class RedisConfig implements BeanDefinitionRegistryPostProcessor, ApplicationContextAware {
 
     private String basePackage = "com"; // fallback 기본값

@@ -204,7 +204,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     @Override
     public Optional<T> findById(ID id) {
-        DTO dto = getRedisTemplate().opsForValue().get(getRedisKey(id));
+        DTO dto = getCacheStore().get(getRedisKey(id));
         if (dto == null) {
             return Optional.empty();
         }
@@ -224,7 +224,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     @Override
     public boolean existsById(ID id) {
-        return Boolean.TRUE.equals(getRedisTemplate().hasKey(getRedisKey(id)));
+        return getCacheStore().hasKey(getRedisKey(id));
     }
 
     @Override
@@ -232,7 +232,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         List<String> keys = new ArrayList<>();
         ids.forEach(id -> keys.add(getRedisKey(id)));
 
-        List<DTO> dtos = getRedisTemplate().opsForValue().multiGet(keys);
+        List<DTO> dtos = getCacheStore().multiGet(keys);
         if (dtos == null) {
             return Collections.emptyList();
         }
@@ -272,7 +272,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
                 }
             }
-            getRedisTemplate().opsForValue().set(getRedisKey(id), dto);
+            getCacheStore().set(getRedisKey(id), dto);
         }
         return dtos;
     }
@@ -291,6 +291,41 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         return cacheKeyPrefix + ":" + id;
     }
 
+    /**
+     * CacheStore를 반환합니다. Redis 또는 InMemory 구현체가 사용됩니다.
+     */
+    @SuppressWarnings("unchecked")
+    protected final CacheStore<DTO> getCacheStore() {
+        // 먼저 CacheStore 빈이 있는지 확인 (인메모리 또는 커스텀)
+        String cacheStoreBeanName = cacheKeyPrefix + "CacheStore";
+        if (applicationContext.containsBean(cacheStoreBeanName)) {
+            return (CacheStore<DTO>) applicationContext.getBean(cacheStoreBeanName);
+        }
+        
+        // 글로벌 CacheStore가 있으면 사용 (InMemory 또는 커스텀)
+        if (applicationContext.containsBean("globalCacheStore")) {
+            return (CacheStore<DTO>) applicationContext.getBean("globalCacheStore");
+        }
+        
+        // 폴백 CacheStore 확인 (Redis 없을 때 자동 생성된 InMemory)
+        if (applicationContext.containsBean("fallbackCacheStore")) {
+            return (CacheStore<DTO>) applicationContext.getBean("fallbackCacheStore");
+        }
+        
+        // Redis 사용 - RedisTemplate을 래핑하여 반환 (하위 호환)
+        try {
+            return new RedisCacheStore<>((RedisTemplate<String, DTO>) applicationContext.getBean(redisTemplateBeanName));
+        } catch (Exception e) {
+            // RedisTemplate도 없으면 임시 InMemory 사용 (개발 편의)
+            System.err.println("[SharedSync] No cache store found, using temporary InMemory cache. Configure sharedsync.cache.type=memory for production.");
+            return (CacheStore<DTO>) new InMemoryCacheStore<DTO>();
+        }
+    }
+
+    /**
+     * @deprecated Use getCacheStore() instead
+     */
+    @Deprecated
     @SuppressWarnings("unchecked")
     protected final RedisTemplate<String, DTO> getRedisTemplate() {
         return (RedisTemplate<String, DTO>) applicationContext.getBean(redisTemplateBeanName);
@@ -319,7 +354,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             id = extractId(dto);
         }
 
-        getRedisTemplate().opsForValue().set(getRedisKey(id), dto);
+        getCacheStore().set(getRedisKey(id), dto);
         return dto;
     }
 
@@ -338,12 +373,12 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             throw new IllegalArgumentException("update는 ID가 필수입니다. save를 사용하세요.");
         }
 
-        DTO existingDto = getRedisTemplate().opsForValue().get(getRedisKey(id));
+        DTO existingDto = getCacheStore().get(getRedisKey(id));
         if (existingDto != null) {
             dto = mergeDto(existingDto, dto);
         }
 
-        getRedisTemplate().opsForValue().set(getRedisKey(id), dto);
+        getCacheStore().set(getRedisKey(id), dto);
         return dto;
     }
 
@@ -420,16 +455,16 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     /**
-     * Redis DECR을 사용하여 원자적으로 임시 음수 ID 생성
-     * Redis의 카운터를 사용하므로 동시성 문제 없이 고유한 음수 ID 보장
+     * CacheStore의 decrement를 사용하여 원자적으로 임시 음수 ID 생성
+     * 동시성 문제 없이 고유한 음수 ID 보장
      * 각 엔티티 타입별로 별도의 카운터 사용
      */
     private Integer generateTemporaryId() {
         // 엔티티 타입별로 별도의 카운터 키 사용 (예: "temporary:timetableplaceblock:counter")
         String counterKey = "temporary:" + cacheKeyPrefix + ":counter";
 
-        // Redis의 DECR 명령: 키가 없으면 0에서 시작해서 -1 반환, 이후 -2, -3, ...
-        Long counter = getRedisTemplate().opsForValue().decrement(counterKey);
+        // DECR 명령: 키가 없으면 0에서 시작해서 -1 반환, 이후 -2, -3, ...
+        Long counter = getCacheStore().decrement(counterKey);
 
         return counter.intValue();
     }
@@ -746,23 +781,23 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     /**
      * ParentId로 캐시에서 DTO 리스트 조회
-     * Redis에 이미 저장된 DTO를 직접 반환 (Entity 변환 없음)
+     * 캐시에 이미 저장된 DTO를 직접 반환 (Entity 변환 없음)
      */
     public List<DTO> findDtosByParentId(ID parentId) {
         if (parentIdField == null) {
             throw new UnsupportedOperationException("ParentId 필드가 없습니다.");
         }
 
-        // Redis에서 패턴으로 모든 키 찾기 (예: "plan:*")
+        // 캐시에서 패턴으로 모든 키 찾기 (예: "plan:*")
         String pattern = cacheKeyPrefix + ":*";
-        Set<String> keys = getRedisTemplate().keys(pattern);
+        Set<String> keys = getCacheStore().keys(pattern);
 
         if (keys == null || keys.isEmpty()) {
             return Collections.emptyList();
         }
 
         // 모든 DTO 가져오기
-        List<DTO> allDtos = getRedisTemplate().opsForValue().multiGet(keys);
+        List<DTO> allDtos = getCacheStore().multiGet(new ArrayList<>(keys));
         if (allDtos == null) {
             return Collections.emptyList();
         }
@@ -882,12 +917,12 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
      */
     public List<DTO> findAllDtos() {
         String pattern = cacheKeyPrefix + ":*";
-        Set<String> keys = getRedisTemplate().keys(pattern);
+        Set<String> keys = getCacheStore().keys(pattern);
         if (keys == null || keys.isEmpty()) {
             return Collections.emptyList();
         }
 
-        List<DTO> allDtos = getRedisTemplate().opsForValue().multiGet(keys);
+        List<DTO> allDtos = getCacheStore().multiGet(new ArrayList<>(keys));
         if (allDtos == null) {
             return Collections.emptyList();
         }
@@ -1477,7 +1512,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     public DTO findDtoById(ID id){
-        return getRedisTemplate().opsForValue().get(getRedisKey(id));
+        return getCacheStore().get(getRedisKey(id));
     }
     public List<DTO> findDtoListByParentId(ID parentId){
         return findDtosByParentId(parentId);
@@ -1529,7 +1564,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
 
         propagateParentDeletion(id);
-        getRedisTemplate().delete(getRedisKey(id));
+        getCacheStore().delete(getRedisKey(id));
     }
 
     @SuppressWarnings("unchecked")
@@ -1792,7 +1827,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         if (cacheId != null) {
             String cacheKey = getRedisKey(cacheId);
             DTO dtoToCache = Objects.requireNonNull(updatedDto);
-            getRedisTemplate().opsForValue().set(cacheKey, dtoToCache);
+            getCacheStore().set(cacheKey, dtoToCache);
         }
 
         // 새로 영속화된 ID를 모든 하위 캐시에 전파
@@ -1801,7 +1836,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
         if (previousId != null && !Objects.equals(previousId, cacheId)) {
             String staleKey = getRedisKey(previousId);
-            getRedisTemplate().delete(staleKey);
+            getCacheStore().delete(staleKey);
         }
         return updatedDto;
     }
@@ -1913,12 +1948,12 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
 
         String pattern = cacheKeyPrefix + ":*";
-        Set<String> keys = getRedisTemplate().keys(pattern);
+        Set<String> keys = getCacheStore().keys(pattern);
         if (keys == null || keys.isEmpty()) {
             return;
         }
 
-        List<DTO> dtos = getRedisTemplate().opsForValue().multiGet(keys);
+        List<DTO> dtos = getCacheStore().multiGet(new ArrayList<>(keys));
         if (dtos == null || dtos.isEmpty()) {
             return;
         }
@@ -1934,7 +1969,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                     ID dtoId = extractId(updated);
                     if (dtoId != null) {
                         String redisKey = getRedisKey(dtoId);
-                        getRedisTemplate().opsForValue().set(redisKey, Objects.requireNonNull(updated));
+                        getCacheStore().set(redisKey, Objects.requireNonNull(updated));
                     }
                 }
             } catch (IllegalAccessException e) {
