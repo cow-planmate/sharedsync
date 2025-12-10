@@ -1,16 +1,17 @@
 package com.sharedsync.shared.listener;
 
-import jakarta.annotation.PostConstruct;
-import lombok.RequiredArgsConstructor;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Component;
 
 import com.sharedsync.shared.dto.CacheDto;
 import com.sharedsync.shared.repository.AutoCacheRepository;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
 
 @Component
 @RequiredArgsConstructor
@@ -27,6 +28,9 @@ public class CacheInitializer {
 
         Map<String, AutoCacheRepository> repositories =
                 context.getBeansOfType(AutoCacheRepository.class);
+        if(repositories.isEmpty()){
+            return;
+        }
 
         for (AutoCacheRepository repo : repositories.values()) {
             cacheMap.put(repo.getEntityType(), repo);
