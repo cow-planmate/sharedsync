@@ -43,7 +43,7 @@ public class CacheInitializer {
     public void initializeHierarchy(String rootId) {
         AutoCacheRepository<?, ?, ?> rootRepo = findRootRepository();
         if (rootRepo == null) {
-            throw new IllegalStateException("No root CacheEntity found");
+            return;
         }
 
         loadRecursively(rootRepo, rootId);
