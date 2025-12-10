@@ -2,6 +2,7 @@ package com.sharedsync.shared.presence.storage;
 
 import java.util.Map;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -9,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 
 @Component
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "sharedsync.cache.type", havingValue = "redis")
 public class RedisPresenceStorage implements PresenceStorage {
 
     private final RedisTemplate<String, Object> redis;
