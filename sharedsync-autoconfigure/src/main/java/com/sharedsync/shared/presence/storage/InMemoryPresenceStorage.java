@@ -1,5 +1,7 @@
 package com.sharedsync.shared.presence.storage;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -87,5 +89,19 @@ public class InMemoryPresenceStorage implements PresenceStorage {
     @Override
     public String removeUserRootMapping(String userId) {
         return userToRoot.remove(userId);
+    }
+
+    @Override
+    public List<String> getUserIdsInRoom(String rootId) {
+        Map<String, String> tracker = trackers.get(rootId);
+        if (tracker == null) {
+            return new ArrayList<>();
+        }
+        List<String> userIds = new ArrayList<>();
+        for (String key : tracker.keySet()) {
+            String userId = key.split("//")[0]; // "userId//sessionId" → userId만 추출
+            userIds.add(userId);
+        }
+        return userIds;
     }
 }
