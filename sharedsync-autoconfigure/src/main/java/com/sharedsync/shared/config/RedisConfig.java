@@ -12,6 +12,7 @@ import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.BeanDefinitionRegistryPostProcessor;
 import org.springframework.beans.factory.support.GenericBeanDefinition;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
@@ -30,9 +31,17 @@ import com.fasterxml.jackson.databind.jsontype.impl.LaissezFaireSubTypeValidator
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.sharedsync.shared.annotation.Cache;
 import com.sharedsync.shared.dto.CacheDto;
+import com.sharedsync.shared.repository.CacheStore;
+import com.sharedsync.shared.repository.RedisCacheStore;
 
+/**
+ * Redis 캐시 설정.
+ * sharedsync.cache.type=redis 일 때만 활성화됩니다.
+ * 기본값은 인메모리 캐시를 사용합니다.
+ */
 @EnableCaching
 @Configuration
+@ConditionalOnProperty(name = "sharedsync.cache.type", havingValue = "redis")
 public class RedisConfig implements BeanDefinitionRegistryPostProcessor, ApplicationContextAware {
 
     private String basePackage = "com"; // fallback 기본값
@@ -89,6 +98,21 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
         configureSerializers(template);
         template.afterPropertiesSet();
         return template;
+    }
+
+    /**
+     * Redis 기반 globalCacheStore 빈 등록
+     * AutoCacheRepository에서 getCacheStore()가 이 빈을 우선적으로 사용합니다.
+     */
+    @Bean(name = "globalCacheStore")
+    @SuppressWarnings("rawtypes")
+    public CacheStore redisCacheStore(RedisConnectionFactory connectionFactory, GenericJackson2JsonRedisSerializer serializer) {
+        RedisTemplate<String, Object> template = new RedisTemplate<>();
+        template.setConnectionFactory(connectionFactory);
+        configureSerializers(template, serializer);
+        template.afterPropertiesSet();
+        System.out.println("[SharedSync] Using Redis cache store");
+        return new RedisCacheStore<>(template);
     }
 
 

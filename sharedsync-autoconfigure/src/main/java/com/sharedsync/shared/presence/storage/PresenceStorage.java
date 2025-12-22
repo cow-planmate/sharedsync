@@ -1,5 +1,6 @@
 package com.sharedsync.shared.presence.storage;
 
+import java.util.List;
 import java.util.Map;
 
 public interface PresenceStorage {
@@ -15,4 +16,6 @@ public interface PresenceStorage {
     void mapUserToRoot(String rootId, String userId);
     String getRootIdByUserId(String userId);
     String removeUserRootMapping(String userId);
+    List<String> getUserIdsInRoom(String rootId);
+
 }

@@ -5,8 +5,8 @@ import java.util.List;
 import org.springframework.context.event.EventListener;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.stereotype.Component;
+import org.springframework.web.socket.messaging.SessionConnectEvent;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
-import org.springframework.web.socket.messaging.SessionSubscribeEvent;
 
 import lombok.RequiredArgsConstructor;
 
@@ -18,14 +18,17 @@ public class SharedEventTracker {
     private final PresenceSessionManager presenceSessionManager;
 
     @EventListener
-    public void handleSubscribeEvent(SessionSubscribeEvent event) {
+    public void handleConnectEvent(SessionConnectEvent event) {
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
         String sessionId = accessor.getSessionId();
         String userId = extractUserId(accessor);
-        String roomId = parseRoomId(accessor.getDestination());
+        String roomId = accessor.getFirstNativeHeader("roomId");
+        if (roomId == null) {
+            roomId = parseRoomId(accessor.getDestination());
+        }
 
         if (userId != null && roomId != null) {
-            presenceSessionManager.handleSubscribe(roomId, userId, sessionId);
+            presenceSessionManager.handleConnect(roomId, userId, sessionId);
         }
     }
 
@@ -54,6 +57,9 @@ public class SharedEventTracker {
     private String parseRoomId(String destination) {
         if (destination == null) return null;
         List<String> tokens = List.of(destination.split("/"));
+        if (tokens.size() <= 2) {
+            return null;
+        }
         return tokens.get(2);
     }
 }

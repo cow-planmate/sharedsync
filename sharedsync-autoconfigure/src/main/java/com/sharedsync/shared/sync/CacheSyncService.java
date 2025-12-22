@@ -7,6 +7,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.sharedsync.shared.repository.AutoCacheRepository;
 
@@ -17,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 public class CacheSyncService {
     private final List<AutoCacheRepository<?, ?, ?>> cacheRepositories;
 
+    @Transactional
     public void syncToDatabase(String rootId) {
         AutoCacheRepository<?, ?, ?> rootRepository = cacheRepositories.stream()
                 .filter(repo -> !repo.isParentIdFieldPresent())
@@ -68,21 +70,7 @@ public class CacheSyncService {
 
             persistentIds.forEach(childId -> syncRecursively(childRepo, childId));
         }
+        // 동기화가 끝난 항목의 캐시를 제거합니다 (하위 항목은 재귀적으로 먼저 제거됨)
+        repository.deleteCacheByIdUnchecked(id);
     }
-
-    // public void syncToDatabase(int planId) {
-    //     PlanDto planDto = planCache.findDtoById(planId);
-    //     PlanDto updatedPlanDto = planCache.syncToDatabaseByDto(planDto);
-
-    //     timeTableCache.syncToDatabaseByParentId(updatedPlanDto.planId());
-    //     List<TimeTableDto> refreshedTimeTables = timeTableCache.findDtoListByParentId(planId);
-
-    //     for (TimeTableDto timeTableDto : refreshedTimeTables) {
-    //         Integer timeTableId = timeTableDto.timeTableId();
-    //         timeTablePlaceBlockCache.syncToDatabaseByParentId(timeTableId);
-    //         timeTablePlaceBlockCache.deleteCacheByParentId(timeTableId);
-    //     }
-    //     timeTableCache.deleteCacheByParentId(planId);
-    //     planCache.deleteCacheById(planId);
-    // }
 }

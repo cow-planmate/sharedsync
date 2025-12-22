@@ -1,7 +1,10 @@
 package com.sharedsync.shared.presence.storage;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -9,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 
 @Component
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "sharedsync.cache.type", havingValue = "redis")
 public class RedisPresenceStorage implements PresenceStorage {
 
     private final RedisTemplate<String, Object> redis;
@@ -82,5 +86,19 @@ public class RedisPresenceStorage implements PresenceStorage {
         Object v = redis.opsForValue().getAndDelete(USER_TO_ROOT + userId);
         return v == null ? null : (String) v;
     }
+
+    @Override
+    public List<String> getUserIdsInRoom(String rootId) {
+        Map<Object, Object> entries = redis.opsForHash().entries(TRACKER + rootId);
+
+        List<String> list = new ArrayList<>();
+        for (Object k : entries.keySet()) {
+            String key = k.toString();
+            String userId = key.split("//")[0]; // "userId//sessionId" → userId만 추출
+            list.add(userId);
+        }
+        return list;
+    }
+
 }
 

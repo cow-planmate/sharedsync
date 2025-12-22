@@ -25,6 +25,7 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
 
         // 🚀 데모 모드: 인증 완전 비활성화
         if (!authProperties.isEnabled()) {
+            attributes.put("userId", tokenResolver.extractPrincipalId("token"));
             return true;
         }
 
@@ -59,8 +60,20 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
             return auth.substring(7).trim();
         }
         String query = request.getURI().getQuery();
-        if(query != null && query.startsWith("token=")) {
-            return query.substring(6).trim();
+        if (query != null) {
+            // split query into key=val pairs and find token parameter (handles additional params like &roomId=...)
+            String[] parts = query.split("&");
+            for (String part : parts) {
+                if (part.startsWith("token=")) {
+                    String val = part.substring(6).trim();
+                    try {
+                        // decode in case token was URL-encoded
+                        return java.net.URLDecoder.decode(val, java.nio.charset.StandardCharsets.UTF_8.name());
+                    } catch (Exception e) {
+                        return val;
+                    }
+                }
+            }
         }
         return null;
     }

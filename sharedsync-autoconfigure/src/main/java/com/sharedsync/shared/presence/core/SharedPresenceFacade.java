@@ -14,15 +14,19 @@ public class SharedPresenceFacade {
 
     private final PresenceStorage storage;
 
-    public List<PresenceSnapshot> getPresence(String planId) {
-        var entries = storage.getTrackerEntries(planId);
+    public List<PresenceSnapshot> getPresence(String roomId) {
+        var entries = storage.getTrackerEntries(roomId);
 
         if (entries == null || entries.isEmpty()) return Collections.emptyList();
 
         List<PresenceSnapshot> snapshots = new ArrayList<>();
 
         for (var e : entries.entrySet()) {
-            String userId = e.getKey();
+
+            // "userId//sessionId" → userId 파싱
+            String rawKey = e.getKey();
+            String userId = rawKey.contains("//") ? rawKey.split("//")[0] : rawKey;
+
             String dayIndex = e.getValue();
             String nickname = storage.getNicknameByUserId(userId);
 
@@ -35,6 +39,8 @@ public class SharedPresenceFacade {
                     attr
             ));
         }
+
         return snapshots;
     }
+
 }
