@@ -19,7 +19,7 @@ public class ServiceGenerator {
 	public static boolean process(CacheInformation cacheInfo, ProcessingEnvironment processingEnv) {
 
 		String idType = cacheInfo.getIdType();      // Long / Integer
-		String idGetter = "get" + Generator.capitalizeFirst(cacheInfo.getCacheEntityIdName()) + "()";
+		String idGetter = "get" + Generator.capitalizeFirst(cacheInfo.getIdName()) + "()";
 
 		StringBuilder source = new StringBuilder();
 		source.append("package ").append(cacheInfo.getServicePath()).append(";\n\n");

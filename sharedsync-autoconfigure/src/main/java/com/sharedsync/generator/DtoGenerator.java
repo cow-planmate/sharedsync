@@ -151,12 +151,7 @@ public class DtoGenerator {
         for (FieldInfo field : fields) {
 
             if (field.getName().equals(idName)) {
-                sb.append("                ");
-                if (field.getName().equals(cacheInfo.getIdName())) {
-                    sb.append("this.").append(cacheInfo.getCacheEntityIdName()).append(",\n");
-                } else {
-                    sb.append("this.").append(field.getName()).append(",\n");
-                }
+                sb.append("                this.").append(field.getName()).append(",\n");
                 continue;
             }
 
@@ -268,7 +263,7 @@ public class DtoGenerator {
 
             if (matched != null) {
                 String elemSimple = Generator.removePath(matched.getEntityPath());
-                String idMethod = "get" + Generator.capitalizeFirst(matched.getEntityIdName());
+                String idMethod = "get" + Generator.capitalizeFirst(matched.getCacheEntityIdName());
                 sb.append("            METHOD_GETID_").append(up).append(" = ").append(elemSimple).append(".class.getMethod(\"").append(idMethod).append("\");\n");
             } else {
                 sb.append("            METHOD_GETID_").append(up).append(" = Object.class.getMethod(\"toString\");\n");
@@ -288,7 +283,7 @@ public class DtoGenerator {
 
             if (matched != null) {
                 String elemSimple = Generator.removePath(matched.getEntityPath());
-                String idMethod = "get" + Generator.capitalizeFirst(matched.getEntityIdName());
+                String idMethod = "get" + Generator.capitalizeFirst(matched.getCacheEntityIdName());
                 sb.append("            METHOD_GETID_").append(up).append(" = ").append(elemSimple).append(".class.getMethod(\"").append(idMethod).append("\");\n");
             } else {
                 sb.append("            METHOD_GETID_").append(up).append(" = Object.class.getMethod(\"toString\");\n");
@@ -483,8 +478,8 @@ public class DtoGenerator {
         // build parameter list in same order as fromEntity (id first, then entity fields excluding id)
         StringBuilder params = new StringBuilder();
         List<FieldInfo> fields = cacheInfo.getEntityFields();
-        // first param: cache id
-        params.append(cacheInfo.getIdType()).append(" ").append(cacheInfo.getCacheEntityIdName());
+        // first param: id
+        params.append(cacheInfo.getIdType()).append(" ").append(cacheInfo.getIdName());
 
         for (FieldInfo fieldInfo : fields) {
             if (fieldInfo.getName().equals(cacheInfo.getIdName())) continue;
@@ -534,8 +529,8 @@ public class DtoGenerator {
         sb.append("    public ").append(cacheInfo.getDtoClassName()).append("(").append(params.toString()).append(") {\n");
 
         // assignments
-        // first assignment: cache id
-        sb.append("        this.").append(cacheInfo.getCacheEntityIdName()).append(" = ").append(cacheInfo.getCacheEntityIdName()).append(";\n");
+        // first assignment: id
+        sb.append("        this.").append(cacheInfo.getIdName()).append(" = ").append(cacheInfo.getIdName()).append(";\n");
 
         for (FieldInfo fieldInfo : fields) {
             if (fieldInfo.getName().equals(cacheInfo.getIdName())) continue;
@@ -584,7 +579,7 @@ public class DtoGenerator {
     private static String writeIdGetter(CacheInformation cacheInfo) {
         StringBuilder sb = new StringBuilder();
         String idType = cacheInfo.getIdType();
-        String idField = cacheInfo.getCacheEntityIdName();
+        String idField = cacheInfo.getIdName();
         String getterName = "get" + Generator.capitalizeFirst(idField);
 
         sb.append("    public ").append(idType).append(" ").append(getterName).append("() {\n");
@@ -634,7 +629,7 @@ public class DtoGenerator {
         fields.append("    private ")
             .append(cacheInfo.getIdType())
                 .append(" ")
-                .append(cacheInfo.getCacheEntityIdName())
+                .append(cacheInfo.getIdName())
                 .append(";\n");
 
         for (FieldInfo fieldInfo : cacheInfo.getEntityFields()) {
@@ -814,13 +809,7 @@ public class DtoGenerator {
         for (FieldInfo field : fields) {
 
             if (field.getName().equals(idName)) {
-                sb.append("                ");
-                if(field.getName().equals(cacheInfo.getIdName())){
-                    sb.append("this.").append(cacheInfo.getCacheEntityIdName()).append(",\n");
-                }
-                else{
-                    sb.append("this.").append(field.getName()).append(",\n");
-                }
+                sb.append("                this.").append(field.getName()).append(",\n");
                 continue;
             }
 

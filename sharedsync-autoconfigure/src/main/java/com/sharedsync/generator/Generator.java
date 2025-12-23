@@ -268,7 +268,7 @@ public class Generator extends AbstractProcessor {
                             if (rf.getAnnotation(jakarta.persistence.Id.class) != null) {
                                 related.setEntityIdType(normalizeType(rf.asType().toString()));
                                 related.setEntityIdName(rf.getSimpleName().toString());
-                                related.setCacheEntityIdName("cache"+relatedEntityName + "Id");
+                                related.setCacheEntityIdName(field.getSimpleName().toString()+"Id");
                                 related.setEntityIdOriginalType(rf.asType().toString());
                                 break;
                             }
