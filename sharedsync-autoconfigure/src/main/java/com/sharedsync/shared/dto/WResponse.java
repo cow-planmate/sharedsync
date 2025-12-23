@@ -7,4 +7,6 @@ import lombok.Setter;
 @Setter
 public class WResponse {
     private String eventId;
+    private String action;
+    private String entity;
 }

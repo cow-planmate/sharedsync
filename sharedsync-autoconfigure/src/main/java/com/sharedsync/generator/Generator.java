@@ -342,7 +342,6 @@ public class Generator extends AbstractProcessor {
             CacheEntityGenerator.process(cacheInfo, processingEnv);
             DtoGenerator.process(cacheInfo, processingEnv);
             WebsocketDtoGenerator.process(cacheInfo, processingEnv);
-            ControllerGenerator.process(cacheInfo, processingEnv);
             ServiceGenerator.process(cacheInfo, processingEnv);
             // Generate per-entity allArgsConstructor factory class under package sharedsync.allArgsConstructor
             EntityAllArgsConstructorGenerator.process(cacheInfo, processingEnv);
@@ -352,6 +351,10 @@ public class Generator extends AbstractProcessor {
                 presenceControllerGenerated = true;
             }
 
+        }
+
+        if (roundEnv.processingOver()) {
+            ControllerGenerator.generateUnified(cacheInfoList, processingEnv);
         }
 
         return false;

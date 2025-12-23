@@ -7,4 +7,6 @@ import lombok.Setter;
 @Getter
 public class WRequest {
     private String eventId;
+    private String action;
+    private String entity;
 }

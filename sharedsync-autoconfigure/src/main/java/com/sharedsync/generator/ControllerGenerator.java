@@ -17,85 +17,114 @@ public class ControllerGenerator {
 	}
 
 	public static boolean process(CacheInformation cacheInfo, ProcessingEnvironment processingEnv) {
-		String entityName = cacheInfo.getEntityName();
+		return true;
+	}
+
+	public static void generateUnified(java.util.List<CacheInformation> cacheInfoList,
+			ProcessingEnvironment processingEnv) {
+		if (cacheInfoList.isEmpty())
+			return;
 
 		StringBuilder source = new StringBuilder();
-		source.append("package ").append(cacheInfo.getControllerPath()).append(";\n\n");
+		source.append("package sharedsync.controller;\n\n");
 
-		// 🔥 WebSocket 관련 Import 명시적 추가
 		source.append("import org.springframework.messaging.handler.annotation.MessageMapping;\n");
 		source.append("import org.springframework.messaging.handler.annotation.SendTo;\n");
 		source.append("import org.springframework.messaging.handler.annotation.DestinationVariable;\n");
 		source.append("import org.springframework.messaging.handler.annotation.Payload;\n");
-		source.append("import org.springframework.stereotype.Controller;\n\n");
+		source.append("import org.springframework.stereotype.Controller;\n");
+		source.append("import com.fasterxml.jackson.databind.ObjectMapper;\n");
+		source.append("import com.sharedsync.shared.dto.WResponse;\n");
+		source.append("import com.sharedsync.shared.dto.WRequest;\n\n");
 
-		// Shared Controller import
-		source.append("import com.sharedsync.shared.controller.SharedController;\n\n");
+		for (CacheInformation info : cacheInfoList) {
+			source.append("import ").append(info.getRequestPath()).append(".").append(info.getRequestClassName())
+					.append(";\n");
+			source.append("import ").append(info.getResponsePath()).append(".").append(info.getResponseClassName())
+					.append(";\n");
+			source.append("import ").append(info.getServicePath()).append(".").append(info.getServiceClassName())
+					.append(";\n");
+		}
+		source.append("\n");
 
-		// Request/Response import
-		source.append("import ").append(cacheInfo.getRequestPath()).append(".")
-				.append(cacheInfo.getRequestClassName()).append(";\n");
-		source.append("import ").append(cacheInfo.getResponsePath()).append(".")
-				.append(cacheInfo.getResponseClassName()).append(";\n");
-
-		// Service import
-		source.append("import ").append(cacheInfo.getServicePath()).append(".")
-				.append(cacheInfo.getServiceClassName()).append(";\n\n");
-
-		// 클래스 선언
 		source.append("@Controller\n");
-		source.append("public class ").append(cacheInfo.getControllerClassName())
-				.append(" extends SharedController<")
-				.append(cacheInfo.getRequestClassName()).append(", ")
-				.append(cacheInfo.getResponseClassName()).append(", ")
-				.append(cacheInfo.getServiceClassName()).append("> {\n\n");
+		source.append("public class SharedSyncController {\n\n");
 
-		// 생성자
-		source.append("    public ").append(cacheInfo.getControllerClassName()).append("(")
-				.append(cacheInfo.getServiceClassName()).append(" service) {\n")
-				.append("        super(service);\n")
-				.append("    }\n\n");
+		source.append("    private final ObjectMapper objectMapper;\n");
+		for (CacheInformation info : cacheInfoList) {
+			String serviceVar = decapitalizeFirst(info.getServiceClassName());
+			source.append("    private final ").append(info.getServiceClassName()).append(" ").append(serviceVar)
+					.append(";\n");
+		}
+		source.append("\n");
 
-		// CRUD 메서드
-		source.append(writeCrudMethods(entityName, cacheInfo.getRequestClassName(), cacheInfo.getResponseClassName()));
+		source.append("    public SharedSyncController(ObjectMapper objectMapper");
+		for (CacheInformation info : cacheInfoList) {
+			source.append(", ").append(info.getServiceClassName()).append(" ").append(decapitalizeFirst(info.getServiceClassName()));
+		}
+		source.append(") {\n");
+		source.append("        this.objectMapper = objectMapper;\n");
+		for (CacheInformation info : cacheInfoList) {
+			String serviceVar = decapitalizeFirst(info.getServiceClassName());
+			source.append("        this.").append(serviceVar).append(" = ").append(serviceVar).append(";\n");
+		}
+		source.append("    }\n\n");
+
+		source.append("    @MessageMapping(\"/{roomId}/sync\")\n");
+		source.append("    @SendTo(\"/topic/{roomId}/sync\")\n");
+		source.append("    public Object handle(@DestinationVariable(\"roomId\") int roomId, \n");
+		source.append("                         @Payload WRequest payload) {\n\n");
+		source.append("        String entity = payload.getEntity();\n");
+		source.append("        if (entity == null) return null;\n\n");
+
+		source.append("        return switch (entity.toLowerCase()) {\n");
+		for (CacheInformation info : cacheInfoList) {
+			String entityLower = info.getEntityName().toLowerCase();
+			String serviceVar = decapitalizeFirst(info.getServiceClassName());
+			source.append("            case \"").append(entityLower).append("\" -> {\n");
+			source.append("                ").append(info.getRequestClassName()).append(" request = objectMapper.convertValue(payload, ").append(info.getRequestClassName()).append(".class);\n");
+			source.append("                yield handleAction(").append(serviceVar).append(", request);\n");
+			source.append("            }\n");
+		}
+		source.append("            default -> null;\n");
+		source.append("        };\n");
+		source.append("    }\n\n");
+
+		source.append("    private <Req extends WRequest, Res extends WResponse> Res handleAction(com.sharedsync.shared.service.SharedService<Req, Res> service, Req request) {\n");
+		source.append("        String action = request.getAction();\n");
+		source.append("        if (action == null) return null;\n\n");
+		source.append("        Res response = switch (action.toLowerCase()) {\n");
+		source.append("            case \"create\" -> service.create(request);\n");
+		source.append("            case \"read\" -> service.read(request);\n");
+		source.append("            case \"update\" -> service.update(request);\n");
+		source.append("            case \"delete\" -> service.delete(request);\n");
+		source.append("            default -> null;\n");
+		source.append("        };\n");
+		source.append("        if (response != null) {\n");
+		source.append("            response.setAction(action);\n");
+		source.append("            response.setEntity(request.getEntity());\n");
+		source.append("            response.setEventId(request.getEventId() == null ? \"\" : request.getEventId());\n");
+		source.append("        }\n");
+		source.append("        return response;\n");
+		source.append("    }\n");
 
 		source.append("}\n");
 
 		// 파일 생성
 		try {
-			JavaFileObject file = processingEnv.getFiler()
-					.createSourceFile(cacheInfo.getControllerPath() + "." + cacheInfo.getControllerClassName());
+			JavaFileObject file = processingEnv.getFiler().createSourceFile("sharedsync.controller.SharedSyncController");
 			Writer writer = file.openWriter();
 			writer.write(source.toString());
 			writer.close();
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-
-		return true;
 	}
 
-	private static String writeCrudMethods(String entityName, String dtoRequestName, String dtoResponseName) {
-		String lowerEntity = entityName.toLowerCase();
-
-		return generateCrudMethod("create", lowerEntity, dtoRequestName, dtoResponseName)
-				+ "\n"
-				+ generateCrudMethod("read", lowerEntity, dtoRequestName, dtoResponseName)
-				+ "\n"
-				+ generateCrudMethod("update", lowerEntity, dtoRequestName, dtoResponseName)
-				+ "\n"
-				+ generateCrudMethod("delete", lowerEntity, dtoRequestName, dtoResponseName);
-	}
-
-	private static String generateCrudMethod(String action, String lowerEntity, String dtoRequestName,
-											 String dtoResponseName) {
-
-		return "    @MessageMapping(\"/{roomId}/" + action + "/" + lowerEntity + "\")\n"
-				+ "    @SendTo(\"/topic/{roomId}/" + action + "/" + lowerEntity + "\")\n"
-				+ "    public " + dtoResponseName + " " + action
-				+ "(@DestinationVariable(\"roomId\") int roomId, @Payload " + dtoRequestName + " request) {\n"
-				+ "        return handle" + capitalizeFirst(action) + "(roomId, request);\n"
-				+ "    }\n";
+	private static String decapitalizeFirst(String str) {
+		if (str == null || str.isEmpty())
+			return "";
+		return str.substring(0, 1).toLowerCase() + str.substring(1);
 	}
 
 	private static String capitalizeFirst(String str) {

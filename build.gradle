@@ -23,7 +23,7 @@ subprojects {
     }
 
     dependencies {
-        implementation platform("org.springframework.boot:spring-boot-dependencies:3.5.3")
+        implementation platform("org.springframework.boot:spring-boot-dependencies:3.4.1")
 
         compileOnly "org.projectlombok:lombok:1.18.34"
         annotationProcessor "org.projectlombok:lombok:1.18.34"

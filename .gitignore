@@ -25,9 +25,9 @@ replay_pid*
 # ==========================
 # Gradle
 # ==========================
-
-.gradle/
-**/.gradle/
+/.gradle
+*.lock
+*.bin
 
 build/
 **/build/
@@ -81,19 +81,6 @@ Thumbs.db
 **/build/generated/sources/**
 
 
-# ==========================
-# Spring Boot AutoConfig generated metadata
-# ==========================
 
-
-
-# ==========================
-# Misc
-# ==========================
-
-out/
-**/out/
-*.orig
-*.rej
-
-*.gradle/
+*.properties
+.gradle/buildOutputCleanup/outputFiles.bin
