@@ -33,8 +33,6 @@ public class DtoGenerator {
                 + "@Cache\n"
                 + "@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)\n"
                 + "@com.fasterxml.jackson.annotation.JsonAutoDetect(fieldVisibility = com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.ANY)\n"
-                + writeAutoDatabaseLoader(cacheInfo)
-                + writeAutoEntityConverter(cacheInfo)
                 + "public class " + cacheInfo.getDtoClassName()
                 + " extends CacheDto<" + cacheInfo.getIdType() + "> {\n\n"
                 + writeDtoFields(cacheInfo)
@@ -589,35 +587,6 @@ public class DtoGenerator {
         return sb.toString();
     }
 
-    // ==========================================
-    // Auto Annotations
-    // ==========================================
-    private static String writeAutoDatabaseLoader(CacheInformation cacheInfo) {
-        if (cacheInfo.getParentEntityPath() == null || cacheInfo.getParentId() == null) {
-            return "";
-        }
-        return "@AutoDatabaseLoader(repository = \"" + Generator.decapitalizeFirst(cacheInfo.getRepositoryName())
-                + "\", method = \"findBy" + Generator.removePath(cacheInfo.getParentEntityPath())
-                + Generator.capitalizeFirst(cacheInfo.getParentId()) + "\")\n";
-    }
-
-    private static String writeAutoEntityConverter(CacheInformation cacheInfo) {
-        if (cacheInfo.getRelatedEntities().isEmpty()) return "";
-
-        StringBuilder repositories = new StringBuilder();
-        List<String> repoList = cacheInfo.getRelatedEntities().stream()
-                .map(RelatedEntity::getRepositoryPath)
-                .toList();
-
-        for (int i = 0; i < repoList.size(); i++) {
-            repositories.append("\"")
-                    .append(Generator.decapitalizeFirst(Generator.removePath(repoList.get(i))))
-                    .append("\"");
-            if (i < repoList.size() - 1) repositories.append(", ");
-        }
-
-        return "@AutoEntityConverter(repositories = {" + repositories + "})\n";
-    }
 
     // ==========================================
     // DTO Fields

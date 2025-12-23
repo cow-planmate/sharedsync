@@ -62,7 +62,6 @@ public class Generator extends AbstractProcessor {
         private String entityIdType;
         private String entityIdName;
         private String cacheEntityIdName;
-        private String repositoryPath;
         private String entityIdOriginalType;
     }
 
@@ -81,8 +80,6 @@ public class Generator extends AbstractProcessor {
         private String parentEntityPath;
         private String parentId;
 
-        private String repositoryName;
-        private String repositoryPath;
         private List<FieldInfo> entityFields;
 
         // dto
@@ -289,47 +286,6 @@ public class Generator extends AbstractProcessor {
                                 }
                             }
                             cacheInfo.setParentId(parentId);
-                        }
-                    }
-                }
-            }
-
-            // -------------------------------
-            // Repository 자동 탐색
-            // -------------------------------
-            for (Element repoElement : roundEnv.getRootElements()) {
-
-                if (repoElement instanceof TypeElement typeElement) {
-
-                    if (typeElement.getKind().isInterface()) {
-
-                        for (javax.lang.model.type.TypeMirror iface : typeElement.getInterfaces()) {
-
-                            if (iface instanceof DeclaredType dt) {
-
-                                Element ifaceElement = dt.asElement();
-
-                                if (ifaceElement.getSimpleName().toString().equals("JpaRepository")) {
-
-                                    List<? extends javax.lang.model.type.TypeMirror> typeArgs = dt.getTypeArguments();
-
-                                    if (typeArgs.size() == 2) {
-
-                                        String repoEntityType = typeArgs.get(0).toString();
-
-                                        if (repoEntityType.equals(element.asType().toString())) {
-                                            cacheInfo.setRepositoryName(removePath(typeElement.getQualifiedName().toString()));
-                                            cacheInfo.setRepositoryPath(typeElement.getQualifiedName().toString());
-                                        }
-
-                                        for (RelatedEntity related : cacheInfo.getRelatedEntities()) {
-                                            if (repoEntityType.equals(related.getEntityPath())) {
-                                                related.setRepositoryPath(typeElement.getQualifiedName().toString());
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                 }
