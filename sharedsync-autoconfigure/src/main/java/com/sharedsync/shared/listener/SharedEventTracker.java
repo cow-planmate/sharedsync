@@ -7,6 +7,7 @@ import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.messaging.SessionConnectEvent;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
+import org.springframework.web.socket.messaging.SessionSubscribeEvent;
 
 import lombok.RequiredArgsConstructor;
 
@@ -17,18 +18,22 @@ public class SharedEventTracker {
     private static final String USER_ID = "userId";
     private final PresenceSessionManager presenceSessionManager;
 
+
     @EventListener
-    public void handleConnectEvent(SessionConnectEvent event) {
+    public void handleSubscribeEvent(SessionConnectEvent event) {
+        StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
+        String sessionId = accessor.getSessionId();
+    }
+
+    @EventListener
+    public void handleSubscribeEvent(SessionSubscribeEvent event) {
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
         String sessionId = accessor.getSessionId();
         String userId = extractUserId(accessor);
-        String roomId = accessor.getFirstNativeHeader("roomId");
-        if (roomId == null) {
-            roomId = parseRoomId(accessor.getDestination());
-        }
+        String roomId = parseRoomId(accessor.getDestination());
 
         if (userId != null && roomId != null) {
-            presenceSessionManager.handleConnect(roomId, userId, sessionId);
+            presenceSessionManager.handleSubscribe(roomId, userId, sessionId);
         }
     }
 

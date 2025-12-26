@@ -1,18 +1,18 @@
 package com.sharedsync.shared.listener;
 
-import com.sharedsync.shared.properties.SharedSyncAuthProperties;
+import java.util.List;
+import java.util.Map;
+
 import org.springframework.stereotype.Service;
 
 import com.sharedsync.shared.presence.core.PresenceBroadcaster;
 import com.sharedsync.shared.presence.core.PresenceRootResolver;
 import com.sharedsync.shared.presence.core.UserProvider;
 import com.sharedsync.shared.presence.storage.PresenceStorage;
+import com.sharedsync.shared.properties.SharedSyncAuthProperties;
 import com.sharedsync.shared.sync.CacheSyncService;
 
 import lombok.RequiredArgsConstructor;
-
-import java.util.List;
-import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -33,7 +33,7 @@ public class PresenceSessionManager {
     /**
      * 연결 시 (입장)
      */
-    public void handleConnect(String rootId, String userId, String sessionId) {
+    public void handleSubscribe(String rootId, String userId, String sessionId) {
         if (!authProperties.isEnabled()) {
             userId = "ws-" + sessionId;
         }

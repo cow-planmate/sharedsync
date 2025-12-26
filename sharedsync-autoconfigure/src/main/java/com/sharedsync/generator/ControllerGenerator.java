@@ -70,8 +70,8 @@ public class ControllerGenerator {
 		}
 		source.append("    }\n\n");
 
-		source.append("    @MessageMapping(\"/{roomId}/sync\")\n");
-		source.append("    @SendTo(\"/topic/{roomId}/sync\")\n");
+		source.append("    @MessageMapping(\"/{roomId}\")\n");
+		source.append("    @SendTo(\"/topic/{roomId}\")\n");
 		source.append("    public Object handle(@DestinationVariable(\"roomId\") int roomId, \n");
 		source.append("                         @Payload WRequest payload) {\n\n");
 		source.append("        String entity = payload.getEntity();\n");
