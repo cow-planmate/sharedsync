@@ -73,21 +73,25 @@ public class ControllerGenerator {
 		source.append("    @MessageMapping(\"/{roomId}\")\n");
 		source.append("    @SendTo(\"/topic/{roomId}\")\n");
 		source.append("    public Object handle(@DestinationVariable(\"roomId\") int roomId, \n");
-		source.append("                         @Payload WRequest payload) {\n\n");
-		source.append("        String entity = payload.getEntity();\n");
+		source.append("                         @Payload java.util.Map<String, Object> payload) {\n\n");
+		source.append("        String entity = (String) payload.get(\"entity\");\n");
 		source.append("        if (entity == null) return null;\n\n");
 
-		source.append("        return switch (entity.toLowerCase()) {\n");
+		source.append("        Object result = null;\n");
+		source.append("        switch (entity.toLowerCase()) {\n");
 		for (CacheInformation info : cacheInfoList) {
 			String entityLower = info.getEntityName().toLowerCase();
 			String serviceVar = decapitalizeFirst(info.getServiceClassName());
-			source.append("            case \"").append(entityLower).append("\" -> {\n");
+			source.append("            case \"").append(entityLower).append("\": {\n");
 			source.append("                ").append(info.getRequestClassName()).append(" request = objectMapper.convertValue(payload, ").append(info.getRequestClassName()).append(".class);\n");
-			source.append("                yield handleAction(").append(serviceVar).append(", request);\n");
+			source.append("                result = handleAction(").append(serviceVar).append(", request);\n");
+			source.append("                break;\n");
 			source.append("            }\n");
 		}
-		source.append("            default -> null;\n");
-		source.append("        };\n");
+		source.append("            default:\n");
+		source.append("                break;\n");
+		source.append("        }\n");
+		source.append("        return result;\n");
 		source.append("    }\n\n");
 
 		source.append("    private <Req extends WRequest, Res extends WResponse> Res handleAction(com.sharedsync.shared.service.SharedService<Req, Res> service, Req request) {\n");

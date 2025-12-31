@@ -261,7 +261,7 @@ public class DtoGenerator {
 
             if (matched != null) {
                 String elemSimple = Generator.removePath(matched.getEntityPath());
-                String idMethod = "get" + Generator.capitalizeFirst(matched.getCacheEntityIdName());
+                String idMethod = "get" + Generator.capitalizeFirst(matched.getEntityIdName());
                 sb.append("            METHOD_GETID_").append(up).append(" = ").append(elemSimple).append(".class.getMethod(\"").append(idMethod).append("\");\n");
             } else {
                 sb.append("            METHOD_GETID_").append(up).append(" = Object.class.getMethod(\"toString\");\n");
@@ -281,7 +281,7 @@ public class DtoGenerator {
 
             if (matched != null) {
                 String elemSimple = Generator.removePath(matched.getEntityPath());
-                String idMethod = "get" + Generator.capitalizeFirst(matched.getCacheEntityIdName());
+                String idMethod = "get" + Generator.capitalizeFirst(matched.getEntityIdName());
                 sb.append("            METHOD_GETID_").append(up).append(" = ").append(elemSimple).append(".class.getMethod(\"").append(idMethod).append("\");\n");
             } else {
                 sb.append("            METHOD_GETID_").append(up).append(" = Object.class.getMethod(\"toString\");\n");

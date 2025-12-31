@@ -20,8 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.data.redis.core.RedisTemplate;
 
-import com.sharedsync.shared.annotation.AutoDatabaseLoader;
-import com.sharedsync.shared.annotation.AutoEntityConverter;
+import com.sharedsync.generator.Generator;
 import com.sharedsync.shared.annotation.Cache;
 import com.sharedsync.shared.annotation.CacheId;
 import com.sharedsync.shared.annotation.EntityConverter;
@@ -60,11 +59,10 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     private final Method entityConverterMethod;
     private final Field entityIdField;
     private final Class<ID> idClass;
-    private final String parentEntityFieldName; // Entity에서 parent를 참조하는 필드명
+    private final String parentEntityFieldName;
     private final String redisTemplateBeanName;
-    private final String repositoryBeanName;
-    private final String loadMethodName;
-    private final String[] entityConverterRepositories;
+
+
     private final List<Field> dtoFields;
 
     @SuppressWarnings("unchecked")
@@ -96,27 +94,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         // @AutoRedisTemplate 어노테이션에서 Redis 템플릿 이름 추출
         String entityName = dtoClass.getSimpleName().replace("Dto", "");
         this.redisTemplateBeanName = Character.toLowerCase(entityName.charAt(0)) + entityName.substring(1) + "Redis";
-
-
-        // @AutoDatabaseLoader 어노테이션에서 Repository와 메서드 정보 추출
-        AutoDatabaseLoader dbLoaderAnnotation = dtoClass.getAnnotation(AutoDatabaseLoader.class);
-        if (dbLoaderAnnotation != null) {
-            this.repositoryBeanName = dbLoaderAnnotation.repository().isEmpty() ?
-                    generateRepositoryName() : dbLoaderAnnotation.repository();
-            this.loadMethodName = dbLoaderAnnotation.method().isEmpty() ?
-                    generateLoadMethodName() : dbLoaderAnnotation.method();
-        } else {
-            this.repositoryBeanName = generateRepositoryName();
-            this.loadMethodName = generateLoadMethodName();
-        }
-
-        // @AutoEntityConverter 어노테이션에서 필요한 Repository들 추출
-        AutoEntityConverter entityConverterAnnotation = dtoClass.getAnnotation(AutoEntityConverter.class);
-        if (entityConverterAnnotation != null) {
-            this.entityConverterRepositories = entityConverterAnnotation.repositories();
-        } else {
-            this.entityConverterRepositories = new String[0];
-        }
 
         // 필드와 메서드 찾기
         this.idField = findFieldWithAnnotation(dtoClass, CacheId.class);
@@ -591,8 +568,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             for (Field dtoField : dtoFields) {
                 String dtoFieldName = dtoField.getName();
                 if (dtoFieldName == null) continue;
-                if (dtoFieldName.startsWith("cache") && dtoFieldName.endsWith("Id") && dtoFieldName.length() > 7) {
-                    String entitySimple = dtoFieldName.substring(5, dtoFieldName.length() - 2); // e.g. "User"
+                if (dtoFieldName.endsWith("Id")) {
+                    String entitySimple = dtoFieldName.substring(0, dtoFieldName.length() - 2); // e.g. "User"
                     if (entitySimple.isEmpty()) continue;
                     String candidate = Character.toLowerCase(entitySimple.charAt(0)) + entitySimple.substring(1);
 
@@ -992,18 +969,17 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         for (Field field : dtoFields) {
             try {
                 Object value = field.get(dto);
-                System.err.println("[SharedSync][DEBUG]   " + field.getName() + " = " + value);
+                System.err.print("[SharedSync][DEBUG]   " + field.getName() + " = " + value);
             } catch (Exception e) {
                 // ignore
             }
         }
         
-        Object[] params = new Object[entityConverterRepositories.length];
         Class<?>[] parameterTypes = entityConverterMethod.getParameterTypes();
+        Object[] params = new Object[parameterTypes.length];
         Type[] genericParameterTypes = entityConverterMethod.getGenericParameterTypes();
 
-        for (int i = 0; i < entityConverterRepositories.length; i++) {
-            String repoName = entityConverterRepositories[i];
+        for (int i = 0; i < parameterTypes.length; i++) {
             Class<?> paramType = parameterTypes[i];
             Type genericType = genericParameterTypes[i];
 
@@ -1093,7 +1069,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     private List<?> extractRelatedIdList(DTO dto, Class<?> elementType) {
         String elementSimpleName = elementType.getSimpleName();
         // 필드명 패턴: cache + EntityClassName + Ids (복수형)
-        String patternFieldName = "cache" + elementSimpleName + "Ids";
+        String patternFieldName = Generator.decapitalizeFirst(elementSimpleName) + "Ids";
         
         try {
             Field patternField = findFieldInHierarchy(dtoClass, patternFieldName);
@@ -1111,8 +1087,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     private Object extractRelatedId(DTO dto, int parameterIndex) {
-        String repoName = entityConverterRepositories[parameterIndex];
-
         try {
             // Determine the expected entity class from the converter method parameter
             Class<?>[] paramTypes = entityConverterMethod.getParameterTypes();
@@ -1127,9 +1101,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 }
             }
 
-            // Try to resolve repository bean using provided name or derived name/entity type
-            Object repository = resolveRepositoryBean(repoName, entityClass);
-
             if (entityClass == null) {
                 return null;
             }
@@ -1143,8 +1114,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
             // 1순위: 필드명 패턴 매칭 (cache + EntityClassName + Id) - 가장 정확함
             String entitySimpleName = entityClass.getSimpleName();
-            String patternFieldName = "cache" + entitySimpleName + "Id";
-            System.err.println("[SharedSync][DEBUG] extractRelatedId: entityClass=" + entitySimpleName + ", looking for field=" + patternFieldName);
+            String patternFieldName = Generator.decapitalizeFirst(entitySimpleName) + "Id";
+            System.err.println("[SharedSync][DEBUG] extractRelatedId: entityClass=" + patternFieldName + ", looking for field=" + patternFieldName);
             Field patternField = findFieldInHierarchy(dtoClass, patternFieldName);
             if (patternField != null) {
                 patternField.setAccessible(true);
@@ -1183,7 +1154,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
             return null;
         } catch (IllegalAccessException e) {
-            throw new RuntimeException("관련 ID 추출 실패: " + repoName, e);
+            throw new RuntimeException("관련 ID 추출 실패: parameterIndex=" + parameterIndex, e);
         }
     }
 
@@ -1223,80 +1194,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     /**
-     * Repository에서 엔티티 클래스 타입 추출
-     */
-    private Class<?> getEntityClassFromRepository(Object repository) {
-        try {
-            // Spring Data JPA Repository는 프록시 객체이므로 인터페이스를 찾아야 함
-            Class<?>[] interfaces = repository.getClass().getInterfaces();
-
-            for (Class<?> iface : interfaces) {
-                // Repository 인터페이스 찾기
-                if (iface.getName().endsWith("Repository")) {
-                    // 인터페이스의 제네릭 타입 추출
-                    Type[] genericInterfaces = iface.getGenericInterfaces();
-                    for (Type genericInterface : genericInterfaces) {
-                        if (genericInterface instanceof ParameterizedType) {
-                            ParameterizedType parameterizedType = (ParameterizedType) genericInterface;
-                            Type rawType = parameterizedType.getRawType();
-
-                            // JpaRepository 인터페이스 확인
-                            if (rawType.getTypeName().contains("JpaRepository")) {
-                                Type[] typeArguments = parameterizedType.getActualTypeArguments();
-                                if (typeArguments.length > 0) {
-                                    if (typeArguments[0] instanceof Class) {
-                                        return (Class<?>) typeArguments[0]; // 첫 번째 제네릭 타입이 엔티티
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            // 실패 시 null 반환
-        }
-        return null;
-    }
-
-    /**
-     * Resolve a repository bean from the application context. If the provided
-     * bean name is empty or not found, try deriving a bean name from the
-     * entity class (e.g. `User` -> `userRepository`) or search known beans
-     * for one whose entity type matches `entityClass`.
-     */
-    private Object resolveRepositoryBean(String repoName, Class<?> entityClass) {
-        try {
-            if (repoName != null && !repoName.isBlank()) {
-                if (applicationContext.containsBean(repoName)) {
-                    return applicationContext.getBean(repoName);
-                }
-            }
-
-            // Try derived bean name: decapitalize(entitySimpleName) + "Repository"
-            if (entityClass != null) {
-                String derived = Character.toLowerCase(entityClass.getSimpleName().charAt(0))
-                        + entityClass.getSimpleName().substring(1) + "Repository";
-                if (applicationContext.containsBean(derived)) {
-                    return applicationContext.getBean(derived);
-                }
-            }
-
-            // Last resort: search all beans and match by repository entity generic type
-            Map<String, ?> beans = applicationContext.getBeansOfType(Object.class);
-            for (Object bean : beans.values()) {
-                Class<?> repoEntity = getEntityClassFromRepository(bean);
-                if (repoEntity != null && entityClass != null && repoEntity.equals(entityClass)) {
-                    return bean;
-                }
-            }
-        } catch (Exception ignored) {
-            // ignore and return null below
-        }
-        return null;
-    }
-
-    /**
      * 엔티티 클래스에서 @Id 어노테이션이 붙은 필드 이름 찾기
      */
     private String findIdFieldNameInEntity(Class<?> entityClass) {
@@ -1324,151 +1221,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         return null;
     }
 
-    private String generateRepositoryName() {
-        String entityName = dtoClass.getSimpleName().replace("Dto", "");
-        return Character.toLowerCase(entityName.charAt(0)) + entityName.substring(1) + "Repository";
-    }
 
-    private String generateLoadMethodName() {
-        if (parentIdField == null) return "findAll";
-        String parentFieldName = parentIdField.getName().replace("Id", "");
-        String capitalizedParentName = Character.toUpperCase(parentFieldName.charAt(0)) + parentFieldName.substring(1);
-        return "findBy" + capitalizedParentName + capitalizedParentName + "Id";
-    }
-
-    private Method findLoadMethod(Object repository, ID parentId) throws NoSuchMethodException {
-        Class<?> repoClass = repository.getClass();
-        Class<?> expectedParam = parentId != null ? parentId.getClass() : Object.class;
-
-        // 1) try exact match
-        try {
-            return repoClass.getMethod(loadMethodName, expectedParam);
-        } catch (NoSuchMethodException ignored) {
-        }
-
-        // helper to check primitive/wrapper compatibility
-        java.util.function.BiPredicate<Class<?>, Class<?>> compatible = (expected, actual) -> {
-            if (actual.isAssignableFrom(expected)) return true;
-            // wrapper <-> primitive
-            if (expected == Long.class && actual == long.class) return true;
-            if (expected == Integer.class && actual == int.class) return true;
-            if (expected == Short.class && actual == short.class) return true;
-            if (expected == Byte.class && actual == byte.class) return true;
-            if (expected == Double.class && actual == double.class) return true;
-            if (expected == Float.class && actual == float.class) return true;
-            if (expected == Character.class && actual == char.class) return true;
-            if (expected == Boolean.class && actual == boolean.class) return true;
-            // also allow the reverse (primitive method parameter vs wrapper expected)
-            if (actual == Long.class && expected == long.class) return true;
-            if (actual == Integer.class && expected == int.class) return true;
-            if (actual == Short.class && expected == short.class) return true;
-            if (actual == Byte.class && expected == byte.class) return true;
-            if (actual == Double.class && expected == double.class) return true;
-            if (actual == Float.class && expected == float.class) return true;
-            if (actual == Character.class && expected == char.class) return true;
-            if (actual == Boolean.class && expected == boolean.class) return true;
-            return false;
-        };
-
-        // 2) search public methods on the proxy/impl class
-        for (Method m : repoClass.getMethods()) {
-            if (!m.getName().equals(loadMethodName)) continue;
-            if (m.getParameterCount() != 1) continue;
-            Class<?> actualParam = m.getParameterTypes()[0];
-            if (compatible.test(expectedParam, actualParam)) {
-                return m;
-            }
-        }
-
-        // 3) search declared methods on implemented interfaces (often repository interfaces)
-        for (Class<?> iface : repoClass.getInterfaces()) {
-            for (Method m : iface.getMethods()) {
-                if (!m.getName().equals(loadMethodName)) continue;
-                if (m.getParameterCount() != 1) continue;
-                Class<?> actualParam = m.getParameterTypes()[0];
-                if (compatible.test(expectedParam, actualParam)) {
-                    return m;
-                }
-            }
-        }
-
-        // 4) Fallback: try alternative method name patterns commonly used in Spring Data JPA
-        //    e.g., findByUserShelfBookId -> findByUserShelfBook_Id or findByUserShelfBookUserShelfBookId
-        List<String> alternativeNames = generateAlternativeMethodNames(loadMethodName);
-        for (String altName : alternativeNames) {
-            for (Method m : repoClass.getMethods()) {
-                if (!m.getName().equals(altName)) continue;
-                if (m.getParameterCount() != 1) continue;
-                Class<?> actualParam = m.getParameterTypes()[0];
-                if (compatible.test(expectedParam, actualParam)) {
-                    return m;
-                }
-            }
-            for (Class<?> iface : repoClass.getInterfaces()) {
-                for (Method m : iface.getMethods()) {
-                    if (!m.getName().equals(altName)) continue;
-                    if (m.getParameterCount() != 1) continue;
-                    Class<?> actualParam = m.getParameterTypes()[0];
-                    if (compatible.test(expectedParam, actualParam)) {
-                        return m;
-                    }
-                }
-            }
-        }
-
-        // 5) Last resort: find ANY method that returns List and takes single compatible param
-        for (Method m : repoClass.getMethods()) {
-            if (!m.getName().startsWith("findBy")) continue;
-            if (m.getParameterCount() != 1) continue;
-            Class<?> actualParam = m.getParameterTypes()[0];
-            if (!compatible.test(expectedParam, actualParam)) continue;
-            // check return type is List or Collection
-            if (java.util.List.class.isAssignableFrom(m.getReturnType()) ||
-                java.util.Collection.class.isAssignableFrom(m.getReturnType())) {
-                return m;
-            }
-        }
-
-        // Nothing matched - throw informative exception
-        throw new NoSuchMethodException("Load method '" + loadMethodName + "' with compatible parameter not found on repository " + repoClass.getName());
-    }
-
-    /**
-     * Generate alternative method name patterns for fallback lookup.
-     * e.g., "findByUserShelfBookId" -> ["findByUserShelfBook_Id", "findByUserShelfBookUserShelfBookId"]
-     */
-    private List<String> generateAlternativeMethodNames(String methodName) {
-        List<String> alternatives = new ArrayList<>();
-        
-        // Pattern: findBy{Entity}Id -> findBy{Entity}_Id (underscore variant)
-        if (methodName.endsWith("Id") && methodName.length() > 8) {
-            String withUnderscore = methodName.substring(0, methodName.length() - 2) + "_Id";
-            alternatives.add(withUnderscore);
-        }
-        
-        // Pattern: findBy{Entity}Id -> findBy{Entity}{Entity}Id (Spring Data nested property)
-        // Extract entity name from findBy{Entity}Id
-        if (methodName.startsWith("findBy") && methodName.endsWith("Id")) {
-            String entityPart = methodName.substring(6, methodName.length() - 2); // e.g., "UserShelfBook"
-            if (!entityPart.isEmpty()) {
-                // findByUserShelfBookUserShelfBookId pattern
-                alternatives.add("findBy" + entityPart + entityPart + "Id");
-                // findByUserShelfBook_UserShelfBookId pattern  
-                alternatives.add("findBy" + entityPart + "_" + entityPart + "Id");
-            }
-        }
-        
-        return alternatives;
-    }
-
-    private Method resolveFindByIdMethod(Object repository) throws NoSuchMethodException {
-        for (Method method : repository.getClass().getMethods()) {
-            if ("findById".equals(method.getName()) && method.getParameterCount() == 1) {
-                return method;
-            }
-        }
-        throw new NoSuchMethodException("findById method not found on repository " + repository.getClass());
-    }
 
     @SuppressWarnings("unchecked")
     private Class<T> getEntityClass() {
