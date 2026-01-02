@@ -45,4 +45,54 @@ public interface CacheStore<V> {
      * 카운터 감소 (원자적) - 임시 ID 생성용
      */
     Long decrement(String key);
+
+    /**
+     * Set에 값 추가
+     */
+    void addToSet(String key, String value);
+
+    /**
+     * Set에서 값 제거
+     */
+    void removeFromSet(String key, String value);
+
+    /**
+     * Set의 모든 값 조회
+     */
+    Set<String> getSet(String key);
+
+    /**
+     * Hash에 값 저장
+     */
+    void hashSet(String key, String field, V value);
+
+    /**
+     * Hash에서 값 조회
+     */
+    V hashGet(String key, String field);
+
+    /**
+     * Hash에서 여러 필드 조회
+     */
+    List<V> hashMutiGet(String key, List<String> fields);
+
+    /**
+     * Hash에서 필드 삭제
+     */
+    void hashDelete(String key, String field);
+
+    /**
+     * Hash의 모든 필드명 조회
+     */
+    Set<String> hashkeys(String key);
+
+    /**
+     * Hash에 문자열 값 저장 (인덱스용)
+     */
+    void hashSetString(String key, String field, String value);
+
+    /**
+     * Hash에서 문자열 값 조회 (인덱스용)
+     */
+    String hashGetString(String key, String field);
 }

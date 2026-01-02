@@ -54,12 +54,11 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     private final Class<DTO> dtoClass;
     private final String cacheKeyPrefix;
     private final Field idField;
-    private final Field parentIdField;
-    private final Class<?> parentEntityClass;
+    private final List<Field> parentIdFields;
+    private final Map<Field, Class<?>> parentEntityClassMap;
     private final Method entityConverterMethod;
     private final Field entityIdField;
     private final Class<ID> idClass;
-    private final String parentEntityFieldName;
     private final String redisTemplateBeanName;
 
 
@@ -102,17 +101,18 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
         this.idField.setAccessible(true);
 
-        this.parentIdField = findFieldWithAnnotation(dtoClass, ParentId.class);
-        if (this.parentIdField != null) {
-            this.parentIdField.setAccessible(true);
-            ParentId parentIdAnnotation = this.parentIdField.getAnnotation(ParentId.class);
-            if (parentIdAnnotation != null && parentIdAnnotation.value() != Object.class) {
-                this.parentEntityClass = parentIdAnnotation.value();
-            } else {
-                this.parentEntityClass = null;
+        this.parentIdFields = new ArrayList<>();
+        this.parentEntityClassMap = new java.util.HashMap<>();
+        
+        for (Field field : dtoClass.getDeclaredFields()) {
+            if (field.isAnnotationPresent(ParentId.class)) {
+                field.setAccessible(true);
+                this.parentIdFields.add(field);
+                ParentId parentIdAnnotation = field.getAnnotation(ParentId.class);
+                if (parentIdAnnotation != null && parentIdAnnotation.value() != Object.class) {
+                    this.parentEntityClassMap.put(field, parentIdAnnotation.value());
+                }
             }
-        } else {
-            this.parentEntityClass = null;
         }
 
         this.entityConverterMethod = findMethodWithAnnotation(dtoClass, EntityConverter.class);
@@ -135,45 +135,13 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 .filter(field -> !Modifier.isStatic(field.getModifiers()))
                 .peek(field -> field.setAccessible(true))
                 .collect(Collectors.collectingAndThen(Collectors.toList(), Collections::unmodifiableList));
-        
-        // Entity에서 parent를 참조하는 필드명 찾기 (Criteria API용)
-        this.parentEntityFieldName = findParentEntityFieldName();
     }
     
-    /**
-     * Entity 클래스에서 parentEntityClass를 참조하는 @ManyToOne 필드명을 찾습니다.
-     * 예: Memo 엔티티의 userShelfBook 필드 → "userShelfBook"
-     */
-    private String findParentEntityFieldName() {
-        if (parentEntityClass == null) {
-            return null;
-        }
-        
-        Class<T> entityClass = getEntityClass();
-        for (Field field : entityClass.getDeclaredFields()) {
-            // @ManyToOne 관계이고, 타입이 parentEntityClass와 일치하는지 확인
-            if (field.isAnnotationPresent(jakarta.persistence.ManyToOne.class)) {
-                if (field.getType().equals(parentEntityClass)) {
-                    return field.getName();
-                }
-            }
-        }
-        
-        // @ManyToOne이 없으면 타입으로만 매칭 시도
-        for (Field field : entityClass.getDeclaredFields()) {
-            if (field.getType().equals(parentEntityClass)) {
-                return field.getName();
-            }
-        }
-        
-        return null;
-    }
-
     // ==== CacheRepository 인터페이스 기본 CRUD 구현 ====
 
     @Override
     public Optional<T> findById(ID id) {
-        DTO dto = getCacheStore().get(getRedisKey(id));
+        DTO dto = getCacheStore().hashGet(getRedisKey(id), String.valueOf(id));
         if (dto == null) {
             return Optional.empty();
         }
@@ -193,15 +161,20 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     @Override
     public boolean existsById(ID id) {
-        return getCacheStore().hasKey(getRedisKey(id));
+        return getCacheStore().hashGet(getRedisKey(id), String.valueOf(id)) != null;
     }
 
     @Override
     public List<T> findAllById(Iterable<ID> ids) {
-        List<String> keys = new ArrayList<>();
-        ids.forEach(id -> keys.add(getRedisKey(id)));
+        if (ids == null) {
+            return Collections.emptyList();
+        }
+        List<String> fields = new ArrayList<>();
+        ids.forEach(id -> fields.add(String.valueOf(id)));
 
-        List<DTO> dtos = getCacheStore().multiGet(keys);
+        if (fields.isEmpty()) return Collections.emptyList();
+
+        List<DTO> dtos = getCacheStore().hashMutiGet(getRedisKey(null), fields);
         if (dtos == null) {
             return Collections.emptyList();
         }
@@ -241,7 +214,20 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
                 }
             }
-            getCacheStore().set(getRedisKey(id), dto);
+            String hashKey = getRedisKey(id);
+            getCacheStore().hashSet(hashKey, String.valueOf(id), dto);
+
+            // 부모 ID 인덱스 추가
+            for (Map.Entry<Field, Class<?>> entry : parentEntityClassMap.entrySet()) {
+                try {
+                    Object parentId = entry.getKey().get(dto);
+                    if (parentId != null) {
+                        addIdToParentIndex(hashKey, entry.getValue(), parentId, id);
+                    }
+                } catch (IllegalAccessException e) {
+                    // ignore
+                }
+            }
         }
         return dtos;
     }
@@ -257,7 +243,49 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     // ==== 내부 헬퍼 메서드 ====
 
     protected final String getRedisKey(ID id) {
-        return cacheKeyPrefix + ":" + id;
+        return cacheKeyPrefix + ":DATA";
+    }
+
+    private String getParentIndexField(Class<?> parentClass, Object parentId) {
+        return "P_IDX:" + parentClass.getSimpleName() + ":" + parentId;
+    }
+
+    private void addIdToParentIndex(String hashKey, Class<?> parentClass, Object parentId, ID id) {
+        if (parentId == null || parentClass == null) return;
+        String field = getParentIndexField(parentClass, parentId);
+        String idStr = String.valueOf(id);
+        
+        synchronized (this) {
+            String existing = getCacheStore().hashGetString(hashKey, field);
+            if (existing == null || existing.isEmpty()) {
+                getCacheStore().hashSetString(hashKey, field, idStr);
+            } else {
+                Set<String> ids = new java.util.LinkedHashSet<>(Arrays.asList(existing.split(",")));
+                if (ids.add(idStr)) {
+                    getCacheStore().hashSetString(hashKey, field, String.join(",", ids));
+                }
+            }
+        }
+    }
+
+    private void removeIdFromParentIndex(String hashKey, Class<?> parentClass, Object parentId, ID id) {
+        if (parentId == null || parentClass == null) return;
+        String field = getParentIndexField(parentClass, parentId);
+        String idStr = String.valueOf(id);
+        
+        synchronized (this) {
+            String existing = getCacheStore().hashGetString(hashKey, field);
+            if (existing != null && !existing.isEmpty()) {
+                Set<String> ids = new java.util.LinkedHashSet<>(Arrays.asList(existing.split(",")));
+                if (ids.remove(idStr)) {
+                    if (ids.isEmpty()) {
+                        getCacheStore().hashDelete(hashKey, field);
+                    } else {
+                        getCacheStore().hashSetString(hashKey, field, String.join(",", ids));
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -308,6 +336,20 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
     }
 
+    protected final List<Object> extractParentIds(DTO dto) {
+        if (parentIdFields.isEmpty()) return Collections.emptyList();
+        List<Object> ids = new ArrayList<>();
+        for (Field field : parentIdFields) {
+            try {
+                Object val = field.get(dto);
+                if (val != null) ids.add(val);
+            } catch (IllegalAccessException e) {
+                // ignore
+            }
+        }
+        return ids;
+    }
+
     /**
      * ID가 null일 경우 임시 음수 ID를 생성하여 저장
      */
@@ -322,7 +364,21 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             id = extractId(dto);
         }
 
-        getCacheStore().set(getRedisKey(id), dto);
+        String hashKey = getRedisKey(id);
+        getCacheStore().hashSet(hashKey, String.valueOf(id), dto);
+        
+        // 부모 ID 인덱스 추가
+        for (Map.Entry<Field, Class<?>> entry : parentEntityClassMap.entrySet()) {
+            try {
+                Object parentId = entry.getKey().get(dto);
+                if (parentId != null) {
+                    addIdToParentIndex(hashKey, entry.getValue(), parentId, id);
+                }
+            } catch (IllegalAccessException e) {
+                // ignore
+            }
+        }
+
         return dto;
     }
 
@@ -341,12 +397,35 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             throw new IllegalArgumentException("update는 ID가 필수입니다. save를 사용하세요.");
         }
 
-        DTO existingDto = getCacheStore().get(getRedisKey(id));
+        String hashKey = getRedisKey(id);
+        DTO existingDto = getCacheStore().hashGet(hashKey, String.valueOf(id));
+        List<Object> oldParentIds = Collections.emptyList();
         if (existingDto != null) {
+            oldParentIds = extractParentIds(existingDto);
             dto = mergeDto(existingDto, dto);
         }
 
-        getCacheStore().set(getRedisKey(id), dto);
+        getCacheStore().hashSet(hashKey, String.valueOf(id), dto);
+        
+        // 부모 ID 인덱스 업데이트
+        for (Map.Entry<Field, Class<?>> entry : parentEntityClassMap.entrySet()) {
+            Field field = entry.getKey();
+            Class<?> parentClass = entry.getValue();
+            try {
+                Object oldId = (existingDto != null) ? field.get(existingDto) : null;
+                Object newId = field.get(dto);
+                
+                if (oldId != null && !Objects.equals(oldId, newId)) {
+                    removeIdFromParentIndex(hashKey, parentClass, oldId, id);
+                }
+                if (newId != null && !Objects.equals(newId, oldId)) {
+                    addIdToParentIndex(hashKey, parentClass, newId, id);
+                }
+            } catch (IllegalAccessException e) {
+                // ignore
+            }
+        }
+
         return dto;
     }
 
@@ -479,19 +558,25 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     @SuppressWarnings("unchecked")
     private List<T> loadEntitiesByParentId(ID parentId) {
+        return loadEntitiesByParentId(parentId, null);
+    }
+
+    private List<T> loadEntitiesByParentId(ID parentId, Class<?> parentClass) {
         parentId = changeType(parentId);
         
-        // Criteria API로 직접 쿼리 (Repository 필요 없음!)
-        if (parentEntityFieldName != null && entityManager != null) {
+        if (entityManager == null) {
+            return Collections.emptyList();
+        }
+
+        // 부모 필드가 있으면 Criteria로 조회
+        if (!parentIdFields.isEmpty()) {
             try {
-                return loadEntitiesByCriteria(parentId);
+                return loadEntitiesByCriteria(parentId, parentClass);
             } catch (Exception e) {
                 e.printStackTrace();
             }
-        }
-        
-        // parentEntityFieldName이 없으면 (루트 엔티티) findAll 사용
-        if (parentEntityFieldName == null && entityManager != null) {
+        } else {
+            // 부모 필드가 없으면 (루트 엔티티) 전체 조회
             try {
                 return loadAllEntitiesByCriteria();
             } catch (Exception e) {
@@ -508,19 +593,51 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
      */
     @SuppressWarnings("unchecked")
     private List<T> loadEntitiesByCriteria(ID parentId) {
+        return loadEntitiesByCriteria(parentId, null);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<T> loadEntitiesByCriteria(ID parentId, Class<?> targetParentClass) {
         Class<T> entityClass = getEntityClass();
         
+        if (parentEntityClassMap.isEmpty() || entityManager == null) {
+            return loadAllEntitiesByCriteria();
+        }
+
         CriteriaBuilder cb = entityManager.getCriteriaBuilder();
         CriteriaQuery<T> query = (CriteriaQuery<T>) cb.createQuery(entityClass);
         Root<T> root = (Root<T>) query.from(entityClass);
         
-        // parent.id = :parentId 조건 생성
-        // 예: SELECT m FROM Memo m WHERE m.userShelfBook.id = :parentId
-        Path<?> parentPath = root.get(parentEntityFieldName);
-        Path<?> parentIdPath = parentPath.get("id");
-        
-        Predicate predicate = cb.equal(parentIdPath, parentId);
-        query.where(predicate);
+        List<Predicate> predicates = new ArrayList<>();
+        for (Class<?> parentClass : parentEntityClassMap.values()) {
+            // 특정 부모 클래스가 지정된 경우 해당 클래스만 처리
+            if (targetParentClass != null && !parentClass.equals(targetParentClass)) {
+                continue;
+            }
+
+            // Entity 클래스에서 해당 부모 타입을 가진 필드 찾기
+            for (Field field : entityClass.getDeclaredFields()) {
+                if (field.getType().equals(parentClass)) {
+                    try {
+                        Path<?> parentPath = root.get(field.getName());
+                        Path<?> parentIdPath = parentPath.get("id");
+                        predicates.add(cb.equal(parentIdPath, parentId));
+                    } catch (Exception e) {
+                        // JPA 필드가 아니거나 id 필드가 없는 경우 무시
+                    }
+                }
+            }
+        }
+
+        if (predicates.isEmpty()) {
+            return loadAllEntitiesByCriteria();
+        }
+
+        if (predicates.size() == 1) {
+            query.where(predicates.get(0));
+        } else {
+            query.where(cb.or(predicates.toArray(new Predicate[0])));
+        }
         
         return entityManager.createQuery(query).getResultList();
     }
@@ -629,9 +746,29 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     @Override
     public final List<DTO> loadFromDatabaseByParentId(ID parentId) {
-        return loadEntitiesByParentId(parentId).stream()
+        return loadFromDatabaseByParentId(parentId, null);
+    }
+
+    @Override
+    public final List<DTO> loadFromDatabaseByParentId(ID parentId, Class<?> parentClass) {
+        // 1. DB에서 최신 데이터 로드
+        List<DTO> dtos = loadEntitiesByParentId(parentId, parentClass).stream()
                 .map(this::convertToDto)
                 .toList();
+
+        // 2. 기존 캐시 데이터 삭제 (인덱스 포함)
+        try {
+            deleteByParentId(parentId, parentClass);
+        } catch (Exception e) {
+            // ignore or log
+        }
+
+        // 3. 새 데이터 캐시에 저장
+        if (!dtos.isEmpty()) {
+            saveAll(dtos);
+        }
+
+        return dtos;
     }
     @SuppressWarnings("unchecked")
     public List<? extends CacheDto<?>> loadFromDatabaseByParentIdUnchecked(Object parentId) {
@@ -650,7 +787,9 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 return null;
             }
 
-            return convertToDto(entity);
+            DTO dto = convertToDto(entity);
+            save(dto); // 캐시 갱신
+            return dto;
 
         } catch (Exception e) {
             return null;
@@ -707,7 +846,12 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
      */
     @Override
     public List<T> findByParentId(ID parentId) {
-        List<DTO> dtos = findDtosByParentId(parentId);
+        return findByParentId(parentId, null);
+    }
+
+    @Override
+    public List<T> findByParentId(ID parentId, Class<?> parentClass) {
+        List<DTO> dtos = findDtosByParentId(parentId, parentClass);
 
         // Entity로 변환
         return dtos.stream()
@@ -721,12 +865,17 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
      */
     @Override
     public List<T> deleteByParentId(ID parentId) {
-        if (parentIdField == null) {
+        return deleteByParentId(parentId, null);
+    }
+
+    @Override
+    public List<T> deleteByParentId(ID parentId, Class<?> parentClass) {
+        if (parentIdFields.isEmpty()) {
             throw new UnsupportedOperationException("ParentId 필드가 없습니다.");
         }
 
         // 먼저 삭제할 DTO들을 조회
-        List<DTO> dtosToDelete = findDtosByParentId(parentId);
+        List<DTO> dtosToDelete = findDtosByParentId(parentId, parentClass);
 
         if (dtosToDelete.isEmpty()) {
             return Collections.emptyList();
@@ -748,45 +897,69 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
      * 캐시에 이미 저장된 DTO를 직접 반환 (Entity 변환 없음)
      */
     public List<DTO> findDtosByParentId(ID parentId) {
-        if (parentIdField == null) {
+        return findDtosByParentId(parentId, null);
+    }
+
+    public List<DTO> findDtosByParentId(ID parentId, Class<?> parentClass) {
+        if (parentIdFields.isEmpty()) {
             throw new UnsupportedOperationException("ParentId 필드가 없습니다.");
         }
 
-        // 캐시에서 패턴으로 모든 키 찾기 (예: "plan:*")
-        String pattern = cacheKeyPrefix + ":*";
-        Set<String> keys = getCacheStore().keys(pattern);
+        String hashKey = getRedisKey(null);
+        Set<String> allChildIds = new java.util.HashSet<>();
 
-        if (keys == null || keys.isEmpty()) {
+        if (parentClass != null) {
+            String field = getParentIndexField(parentClass, parentId);
+            String idListStr = getCacheStore().hashGetString(hashKey, field);
+            if (idListStr != null && !idListStr.isEmpty()) {
+                allChildIds.addAll(Arrays.asList(idListStr.split(",")));
+            }
+        } else {
+            // 클래스가 지정되지 않으면 모든 부모 인덱스를 확인 (하위 호환성)
+            for (Class<?> pClass : parentEntityClassMap.values()) {
+                String field = getParentIndexField(pClass, parentId);
+                String idListStr = getCacheStore().hashGetString(hashKey, field);
+                if (idListStr != null && !idListStr.isEmpty()) {
+                    allChildIds.addAll(Arrays.asList(idListStr.split(",")));
+                }
+            }
+        }
+
+        if (allChildIds.isEmpty()) {
             return Collections.emptyList();
         }
 
-        // 모든 DTO 가져오기
-        List<DTO> allDtos = getCacheStore().multiGet(new ArrayList<>(keys));
+        // 필요한 DTO만 Hash에서 가져오기
+        List<DTO> allDtos = getCacheStore().hashMutiGet(hashKey, new ArrayList<>(allChildIds));
         if (allDtos == null) {
             return Collections.emptyList();
         }
 
-        // parentId로 필터링 (널 안전성 및 타입-유연 비교 적용)
+        // parentId로 최종 필터링 (널 안전성 및 타입-유연 비교 적용)
         return allDtos.stream()
                 .filter(dto -> dto != null)
                 .filter(dto -> {
-                    try {
-                        Object dtoParentId = parentIdField.get(dto);
-                        // dto에 부모 ID가 비어있으면 후보에서 제외
-                        if (dtoParentId == null || parentId == null) {
-                            return false;
+                    if (parentId == null) return false;
+                    
+                    for (Map.Entry<Field, Class<?>> entry : parentEntityClassMap.entrySet()) {
+                        // 클래스가 지정된 경우 해당 클래스 필드만 확인
+                        if (parentClass != null && !entry.getValue().equals(parentClass)) {
+                            continue;
                         }
-
-                        // 동일 타입이면 Objects.equals 사용
-                        if (parentId.getClass().isInstance(dtoParentId) || dtoParentId.getClass().isInstance(parentId)) {
-                            return Objects.equals(parentId, dtoParentId);
+                        
+                        try {
+                            Object dtoParentId = entry.getKey().get(dto);
+                            if (dtoParentId == null) continue;
+                            
+                            if (parentId.getClass().isInstance(dtoParentId) || dtoParentId.getClass().isInstance(parentId)) {
+                                if (Objects.equals(parentId, dtoParentId)) return true;
+                            }
+                            if (parentId.toString().equals(dtoParentId.toString())) return true;
+                        } catch (IllegalAccessException e) {
+                            // ignore
                         }
-
-                        // 타입이 다르면 문자열로 비교 (예: "1" vs 1)
-                        return parentId.toString().equals(dtoParentId.toString());
-                    } catch (IllegalAccessException e) {
-                        return false;
                     }
+                    return false;
                 })
                 .toList();
     }
@@ -878,13 +1051,22 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
      * 캐시에서 모든 DTO 조회
      */
     public List<DTO> findAllDtos() {
-        String pattern = cacheKeyPrefix + ":*";
-        Set<String> keys = getCacheStore().keys(pattern);
-        if (keys == null || keys.isEmpty()) {
+        String hashKey = getRedisKey(null);
+        Set<String> fields = getCacheStore().hashkeys(hashKey);
+        if (fields == null || fields.isEmpty()) {
             return Collections.emptyList();
         }
 
-        List<DTO> allDtos = getCacheStore().multiGet(new ArrayList<>(keys));
+        // 인덱스 필드(P_IDX:...) 제외하고 실제 데이터 필드만 필터링
+        List<String> dataFields = fields.stream()
+                .filter(f -> !f.startsWith("P_IDX:"))
+                .toList();
+
+        if (dataFields.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<DTO> allDtos = getCacheStore().hashMutiGet(hashKey, dataFields);
         if (allDtos == null) {
             return Collections.emptyList();
         }
@@ -1190,7 +1372,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     public DTO findDtoById(ID id){
-        return getCacheStore().get(getRedisKey(id));
+        return getCacheStore().hashGet(getRedisKey(id), String.valueOf(id));
     }
     public List<DTO> findDtoListByParentId(ID parentId){
         return findDtosByParentId(parentId);
@@ -1214,7 +1396,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     public void deleteCacheByParentId(ID parentId) {
-        if (parentIdField == null || parentId == null) {
+        if (parentIdFields.isEmpty() || parentId == null) {
             return;
         }
         removeEntriesByParentInternal(parentId);
@@ -1241,8 +1423,24 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             return;
         }
 
+        String hashKey = getRedisKey(id);
+        // 부모 인덱스에서 제거를 위해 DTO 조회
+        DTO dto = getCacheStore().hashGet(hashKey, String.valueOf(id));
+        if (dto != null) {
+            for (Map.Entry<Field, Class<?>> entry : parentEntityClassMap.entrySet()) {
+                try {
+                    Object parentId = entry.getKey().get(dto);
+                    if (parentId != null) {
+                        removeIdFromParentIndex(hashKey, entry.getValue(), parentId, id);
+                    }
+                } catch (IllegalAccessException e) {
+                    // ignore
+                }
+            }
+        }
+
         propagateParentDeletion(id);
-        getCacheStore().delete(getRedisKey(id));
+        getCacheStore().hashDelete(hashKey, String.valueOf(id));
     }
 
     @SuppressWarnings("unchecked")
@@ -1259,27 +1457,33 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             if (repository == this) {
                 continue;
             }
-            if (repository.parentEntityClass == null) {
+            if (repository.parentEntityClassMap.isEmpty()) {
                 continue;
             }
-            if (!repository.parentEntityClass.isAssignableFrom(entityClass)) {
-                continue;
+            for (Class<?> parentClass : repository.parentEntityClassMap.values()) {
+                if (parentClass.isAssignableFrom(entityClass)) {
+                    repository.removeEntriesByParentInternal(parentIdObject, parentClass);
+                }
             }
-            repository.removeEntriesByParentInternal(parentIdObject);
         }
     }
 
     @SuppressWarnings("unchecked")
     private void removeEntriesByParentInternal(Object parentIdObject) {
-        if (parentIdField == null || parentIdObject == null) {
-            return;
+        if (parentIdObject == null) return;
+        for (Class<?> parentClass : parentEntityClassMap.values()) {
+            removeEntriesByParentInternal(parentIdObject, parentClass);
         }
-        if (!parentIdField.getType().isInstance(parentIdObject)) {
-            return;
-        }
+    }
 
+    @SuppressWarnings("unchecked")
+    private void removeEntriesByParentInternal(Object parentIdObject, Class<?> parentClass) {
+        if (parentIdFields.isEmpty() || parentIdObject == null) {
+            return;
+        }
+        
         ID parentId = (ID) parentIdObject;
-        List<DTO> dtos = findDtosByParentId(parentId);
+        List<DTO> dtos = findDtosByParentId(parentId, parentClass);
         if (dtos.isEmpty()) {
             return;
         }
@@ -1291,16 +1495,13 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     @SuppressWarnings("unchecked")
-    private void syncToDatabaseByParentIdInternal(Object parentIdObject) {
-        if (parentIdField == null || parentIdObject == null) {
+    private void syncToDatabaseByParentIdInternal(Object parentIdObject, Class<?> parentClass) {
+        if (parentIdFields.isEmpty() || parentIdObject == null) {
             return;
         }
-        if (!parentIdField.getType().isInstance(parentIdObject)) {
-            return;
-        }
-
+        
         ID parentId = (ID) parentIdObject;
-        syncToDatabaseByParentId(parentId);
+        syncToDatabaseByParentId(parentId, parentClass);
     }
 
     // ==== 동기화 메소드 ====
@@ -1317,7 +1518,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             return null;
         }
         // 부모가 없을 때
-        if (parentIdField == null) {
+        if (parentIdFields.isEmpty()) {
             return saveToDatabase(dto);
         }
         // 부모가 있을 때
@@ -1337,7 +1538,11 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
      * 캐시에 존재하는 ParentId 하위 DTO들을 DB와 동기화하며, 캐시에 없어진 엔티티는 DB에서도 삭제합니다.
      */
     public List<DTO> syncToDatabaseByParentId(ID parentId) {
-        if (parentIdField == null) {
+        return syncToDatabaseByParentId(parentId, null);
+    }
+
+    public List<DTO> syncToDatabaseByParentId(ID parentId, Class<?> parentClass) {
+        if (parentIdFields.isEmpty()) {
             throw new UnsupportedOperationException("ParentId 필드가 없습니다.");
         }
         if (parentId == null) {
@@ -1347,19 +1552,19 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             return Collections.emptyList(); // 아직 영속화되지 않은 부모
         }
 
-        List<DTO> cachedDtos = findDtoListByParentId(parentId);
+        List<DTO> cachedDtos = findDtosByParentId(parentId, parentClass);
         if (!cachedDtos.isEmpty()) {
             cachedDtos.forEach(this::syncToDatabaseByDto);
         }
 
-        List<DTO> refreshedDtos = findDtoListByParentId(parentId);
+        List<DTO> refreshedDtos = findDtosByParentId(parentId, parentClass);
         Set<ID> cachedPersistentIds = refreshedDtos.stream()
                 .map(this::extractId)
                 .filter(Objects::nonNull)
                 .filter(id -> !isTemporaryId(id))
                 .collect(Collectors.toSet());
 
-        List<T> persistedEntities = loadEntitiesByParentId(parentId);
+        List<T> persistedEntities = loadEntitiesByParentId(parentId, parentClass);
         if (persistedEntities == null || persistedEntities.isEmpty()) {
             return Collections.emptyList();
         }
@@ -1385,12 +1590,18 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     @SuppressWarnings("unchecked")
     public void deleteEntitiesNotInCache(Object parentId, Set<Object> persistentIds) {
-        if (parentIdField == null || parentId == null) {
+        if (parentIdFields.isEmpty() || parentId == null) {
             return;
         }
-        if (!parentIdField.getType().isInstance(parentId)) {
-            return;
+        
+        boolean typeMatched = false;
+        for (Field field : parentIdFields) {
+            if (field.getType().isInstance(parentId)) {
+                typeMatched = true;
+                break;
+            }
         }
+        if (!typeMatched) return;
 
         ID typedParentId = (ID) parentId;
         List<T> persistedEntities = loadEntitiesByParentId(typedParentId);
@@ -1437,14 +1648,15 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             }
 
             for (AutoCacheRepository<?, ?, ?> repository : repositories.values()) {
-                if (repository.parentEntityClass == null) {
+                if (repository.parentEntityClassMap.isEmpty()) {
                     continue;
                 }
-                if (!repository.parentEntityClass.isAssignableFrom(entityClass)) {
-                    continue;
+                for (Class<?> parentClass : repository.parentEntityClassMap.values()) {
+                    if (parentClass.isAssignableFrom(entityClass)) {
+                        repository.syncToDatabaseByParentIdInternal(parentId, parentClass);
+                        repository.removeEntriesByParentInternal(parentId, parentClass);
+                    }
                 }
-                repository.syncToDatabaseByParentIdInternal(parentId);
-                repository.removeEntriesByParentInternal(parentId);
             }
         }
     }
@@ -1503,7 +1715,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         if (cacheId != null) {
             String cacheKey = getRedisKey(cacheId);
             DTO dtoToCache = Objects.requireNonNull(updatedDto);
-            getCacheStore().set(cacheKey, dtoToCache);
+            getCacheStore().hashSet(cacheKey, String.valueOf(cacheId), dtoToCache);
         }
 
         // 새로 영속화된 ID를 모든 하위 캐시에 전파
@@ -1512,7 +1724,20 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
         if (previousId != null && !Objects.equals(previousId, cacheId)) {
             String staleKey = getRedisKey(previousId);
-            getCacheStore().delete(staleKey);
+            getCacheStore().hashDelete(staleKey, String.valueOf(previousId));
+
+            // 부모 인덱스에서 이전 ID 제거하고 새 ID 추가
+            for (Map.Entry<Field, Class<?>> entry : parentEntityClassMap.entrySet()) {
+                try {
+                    Object parentId = entry.getKey().get(updatedDto);
+                    if (parentId != null) {
+                        removeIdFromParentIndex(staleKey, entry.getValue(), parentId, previousId);
+                        addIdToParentIndex(getRedisKey(cacheId), entry.getValue(), parentId, cacheId);
+                    }
+                } catch (IllegalAccessException e) {
+                    // ignore
+                }
+            }
         }
         return updatedDto;
     }
@@ -1552,11 +1777,16 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     public boolean isParentIdFieldPresent() {
-        return parentIdField != null;
+        return !parentIdFields.isEmpty();
     }
 
     public boolean isParentEntityOf(Class<?> potentialParentEntity) {
-        return parentEntityClass != null && parentEntityClass.isAssignableFrom(potentialParentEntity);
+        for (Class<?> parentClass : parentEntityClassMap.values()) {
+            if (parentClass.isAssignableFrom(potentialParentEntity)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public Class<?> getEntityType() {
@@ -1574,11 +1804,16 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
 
     private Object getParentIdValue(DTO dto) {
-        if (parentIdField == null) {
+        if (parentIdFields.isEmpty()) {
             return null;
         }
         try {
-            return parentIdField.get(dto);
+            // 첫 번째 non-null 부모 ID 반환
+            for (Field field : parentIdFields) {
+                Object val = field.get(dto);
+                if (val != null) return val;
+            }
+            return null;
         } catch (IllegalAccessException e) {
             throw new RuntimeException("ParentId 필드 접근 실패", e);
         }
@@ -1607,10 +1842,17 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             if (repository == this) {
                 continue;
             }
-            if (repository.parentEntityClass == null) {
+            if (repository.parentEntityClassMap.isEmpty()) {
                 continue;
             }
-            if (!repository.parentEntityClass.isAssignableFrom(entityClass)) {
+            boolean isParent = false;
+            for (Class<?> parentClass : repository.parentEntityClassMap.values()) {
+                if (parentClass.isAssignableFrom(entityClass)) {
+                    isParent = true;
+                    break;
+                }
+            }
+            if (!isParent) {
                 continue;
             }
             repository.updateParentReferenceInternal(temporaryParentId, persistedParentId);
@@ -1619,57 +1861,66 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     @SuppressWarnings("null")
     private void updateParentReferenceInternal(Object oldParentId, Object newParentId) {
-        if (parentEntityClass == null) {
-            return;
-        }
-        if (parentIdField == null) {
+        if (parentIdFields.isEmpty()) {
             return;
         }
         if (oldParentId == null || newParentId == null) {
             return;
         }
-        if (!parentIdField.getType().isInstance(oldParentId) || !parentIdField.getType().isInstance(newParentId)) {
-            return;
-        }
+        
+        for (Field field : parentIdFields) {
+            if (field.getType().isInstance(oldParentId) && field.getType().isInstance(newParentId)) {
+                // Hash에서 해당 부모를 가진 ID 목록 가져오기 (인덱스 활용)
+                String hashKey = getRedisKey(null);
+                Class<?> parentClass = parentEntityClassMap.get(field);
+                if (parentClass == null) continue;
 
-        String pattern = cacheKeyPrefix + ":*";
-        Set<String> keys = getCacheStore().keys(pattern);
-        if (keys == null || keys.isEmpty()) {
-            return;
-        }
+                String oldIndexField = getParentIndexField(parentClass, oldParentId);
+                String idListStr = getCacheStore().hashGetString(hashKey, oldIndexField);
 
-        List<DTO> dtos = getCacheStore().multiGet(new ArrayList<>(keys));
-        if (dtos == null || dtos.isEmpty()) {
-            return;
-        }
+                if (idListStr == null || idListStr.isEmpty()) {
+                    continue;
+                }
 
-        for (DTO dto : dtos) {
-            if (dto == null) {
-                continue;
-            }
-            try {
-                Object parentValue = parentIdField.get(dto);
-                if (Objects.equals(parentValue, oldParentId)) {
-                    DTO updated = updateDtoParentId(dto, newParentId);
-                    ID dtoId = extractId(updated);
-                    if (dtoId != null) {
-                        String redisKey = getRedisKey(dtoId);
-                        getCacheStore().set(redisKey, Objects.requireNonNull(updated));
+                List<String> fields = Arrays.asList(idListStr.split(","));
+                List<DTO> dtos = getCacheStore().hashMutiGet(hashKey, fields);
+                if (dtos == null || dtos.isEmpty()) {
+                    continue;
+                }
+
+                for (DTO dto : dtos) {
+                    if (dto == null) {
+                        continue;
+                    }
+                    try {
+                        field.set(dto, newParentId);
+                        ID dtoId = extractId(dto);
+                        if (dtoId != null) {
+                            getCacheStore().hashSet(hashKey, String.valueOf(dtoId), dto);
+                        }
+                    } catch (Exception e) {
+                        // ignore
                     }
                 }
-            } catch (IllegalAccessException e) {
-                throw new RuntimeException("ParentId 필드 접근 실패", e);
+
+                // 인덱스 필드 업데이트
+                getCacheStore().hashDelete(hashKey, oldIndexField);
+                getCacheStore().hashSetString(hashKey, getParentIndexField(parentClass, newParentId), idListStr);
             }
         }
     }
 
     private DTO updateDtoParentId(DTO dto, Object newParentId) {
-        if (parentIdField == null) {
+        if (parentIdFields.isEmpty()) {
             return dto;
         }
 
         try {
-            parentIdField.set(dto, newParentId);
+            for (Field field : parentIdFields) {
+                if (field.getType().isInstance(newParentId)) {
+                    field.set(dto, newParentId);
+                }
+            }
             return dto;
         } catch (IllegalAccessException e) {
             throw new RuntimeException("DTO 부모 ID 업데이트 실패", e);

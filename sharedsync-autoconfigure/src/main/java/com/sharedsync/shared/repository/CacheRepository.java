@@ -61,6 +61,10 @@ public interface CacheRepository<T, ID, DTO> {
      * 상위 엔티티로 하위 엔티티들 조회
      */
     default List<T> findByParentId(ID parentId) {
+        return findByParentId(parentId, null);
+    }
+
+    default List<T> findByParentId(ID parentId, Class<?> parentClass) {
         throw new UnsupportedOperationException("findByParentId not implemented");
     }
     
@@ -68,6 +72,10 @@ public interface CacheRepository<T, ID, DTO> {
      * 상위 엔티티로 하위 엔티티들 삭제
      */
     default List<T> deleteByParentId(ID parentId) {
+        return deleteByParentId(parentId, null);
+    }
+
+    default List<T> deleteByParentId(ID parentId, Class<?> parentClass) {
         throw new UnsupportedOperationException("deleteByParentId not implemented");
     }
     
@@ -77,6 +85,10 @@ public interface CacheRepository<T, ID, DTO> {
      * DB에서 데이터를 로드하여 캐시에 저장
      */
     default List<DTO> loadFromDatabaseByParentId(ID parentId) {
+        return loadFromDatabaseByParentId(parentId, null);
+    }
+
+    default List<DTO> loadFromDatabaseByParentId(ID parentId, Class<?> parentClass) {
         throw new UnsupportedOperationException("loadFromDatabase not implemented");
     }
     

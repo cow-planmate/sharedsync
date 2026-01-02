@@ -482,25 +482,6 @@ public class DtoGenerator {
         for (FieldInfo fieldInfo : fields) {
             if (fieldInfo.getName().equals(cacheInfo.getIdName())) continue;
 
-            // ParentId
-            if (cacheInfo.getParentEntityPath() != null
-                    && isSameEntity(fieldInfo,
-                    cacheInfo.getRelatedEntities().stream()
-                            .filter(re -> re.getEntityPath().equals(cacheInfo.getParentEntityPath()))
-                            .findFirst()
-                            .orElse(null))) {
-
-                RelatedEntity parent = cacheInfo.getRelatedEntities().stream()
-                        .filter(re -> re.getEntityPath().equals(cacheInfo.getParentEntityPath()))
-                        .findFirst().orElse(null);
-
-                String parentFieldName = parent.getCacheEntityIdName();
-                String parentFieldType = Generator.denormalizeType(parent.getEntityIdType(), parent.getEntityIdOriginalType());
-
-                params.append(", ").append(parentFieldType).append(" ").append(parentFieldName);
-                continue;
-            }
-
             RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
                     .filter(re -> isSameEntity(fieldInfo, re))
                     .findFirst()
@@ -532,21 +513,6 @@ public class DtoGenerator {
 
         for (FieldInfo fieldInfo : fields) {
             if (fieldInfo.getName().equals(cacheInfo.getIdName())) continue;
-
-            if (cacheInfo.getParentEntityPath() != null
-                    && isSameEntity(fieldInfo,
-                    cacheInfo.getRelatedEntities().stream()
-                            .filter(re -> re.getEntityPath().equals(cacheInfo.getParentEntityPath()))
-                            .findFirst()
-                            .orElse(null))) {
-
-                RelatedEntity parent = cacheInfo.getRelatedEntities().stream()
-                        .filter(re -> re.getEntityPath().equals(cacheInfo.getParentEntityPath()))
-                        .findFirst().orElse(null);
-                String parentFieldName = parent.getCacheEntityIdName();
-                sb.append("        this.").append(parentFieldName).append(" = ").append(parentFieldName).append(";\n");
-                continue;
-            }
 
             RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
                     .filter(re -> isSameEntity(fieldInfo, re))
@@ -605,37 +571,6 @@ public class DtoGenerator {
 
             if (fieldInfo.getName().equals(cacheInfo.getIdName())) continue;
 
-            // ParentId
-            if (cacheInfo.getParentEntityPath() != null
-                    && isSameEntity(fieldInfo,
-                    cacheInfo.getRelatedEntities().stream()
-                            .filter(re -> re.getEntityPath().equals(cacheInfo.getParentEntityPath()))
-                            .findFirst()
-                            .orElse(null))) {
-
-                RelatedEntity parent = cacheInfo.getRelatedEntities().stream()
-                        .filter(re -> re.getEntityPath().equals(cacheInfo.getParentEntityPath()))
-                        .findFirst().orElse(null);
-
-                String parentFieldName = parent.getCacheEntityIdName();
-                String parentFieldType = Generator.denormalizeType(parent.getEntityIdType(), parent.getEntityIdOriginalType());
-
-                if (parent.getTableName() != null) {
-                    fields.append("    @TableName(\"").append(parent.getTableName()).append("\")\n");
-                }
-                fields.append("    @ParentId(")
-                        .append(Generator.removePath(parent.getEntityPath()))
-                        .append(".class)\n");
-
-                fields.append("    private ")
-                    .append(parentFieldType)
-                        .append(" ")
-                        .append(parentFieldName)
-                        .append(";\n");
-
-                continue;
-            }
-
             // ManyToOne
             RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
                     .filter(re -> isSameEntity(fieldInfo, re))
@@ -649,6 +584,13 @@ public class DtoGenerator {
                 if (matched.getTableName() != null) {
                     fields.append("    @TableName(\"").append(matched.getTableName()).append("\")\n");
                 }
+
+                if (matched.isCacheEntity()) {
+                    fields.append("    @ParentId(")
+                            .append(Generator.removePath(matched.getEntityPath()))
+                            .append(".class)\n");
+                }
+
                 fields.append("    private ")
                     .append(fkFieldType)
                         .append(" ")

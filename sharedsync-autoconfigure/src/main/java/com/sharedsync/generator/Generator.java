@@ -64,6 +64,7 @@ public class Generator extends AbstractProcessor {
         private String cacheEntityIdName;
         private String entityIdOriginalType;
         private String tableName;
+        private boolean isCacheEntity;
     }
 
     @Getter
@@ -73,13 +74,9 @@ public class Generator extends AbstractProcessor {
         private String entityName;
         private String idType;
         private String idName;
-        private String cacheEntityIdName;
         private String idOriginalType;
         private String basicPackagePath;
         private String entityPath;
-
-        private String parentEntityPath;
-        private String parentId;
 
         private List<FieldInfo> entityFields;
 
@@ -171,7 +168,6 @@ public class Generator extends AbstractProcessor {
 
             String entityName = element.getSimpleName().toString();
             cacheInfo.setEntityName(entityName);
-            cacheInfo.setCacheEntityIdName("cache"+ entityName + "Id");
             cacheInfo.setEntityPath(element.asType().toString());
 
             // -------------------------------
@@ -263,6 +259,7 @@ public class Generator extends AbstractProcessor {
 
                     if (targetDeclared != null) {
                         TypeElement targetElement = (TypeElement) targetDeclared.asElement();
+                        related.setCacheEntity(targetElement.getAnnotation(CacheEntity.class) != null);
                         
                         // 테이블 이름 추출
                         jakarta.persistence.Table tableAnn = targetElement.getAnnotation(jakarta.persistence.Table.class);
@@ -285,22 +282,6 @@ public class Generator extends AbstractProcessor {
                         }
                     }
                     cacheInfo.addRelatedEntity(related);
-
-                    // ParentEntity 판별
-                    if (field.asType() instanceof DeclaredType declaredType) {
-                        Element typeElement = declaredType.asElement();
-                        if (typeElement.getAnnotation(CacheEntity.class) != null) {
-                            cacheInfo.setParentEntityPath(field.asType().toString());
-                            String parentId = null;
-                            for (Element pf : typeElement.getEnclosedElements()) {
-                                if (pf.getAnnotation(jakarta.persistence.Id.class) != null) {
-                                    parentId = pf.getSimpleName().toString();
-                                    break;
-                                }
-                            }
-                            cacheInfo.setParentId(parentId);
-                        }
-                    }
                 }
             }
 

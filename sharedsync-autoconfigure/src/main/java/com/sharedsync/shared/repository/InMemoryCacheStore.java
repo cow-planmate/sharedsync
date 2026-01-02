@@ -21,6 +21,8 @@ public class InMemoryCacheStore<V> implements CacheStore<V> {
 
     private final Map<String, V> store = new ConcurrentHashMap<>();
     private final Map<String, AtomicLong> counters = new ConcurrentHashMap<>();
+    private final Map<String, Set<String>> sets = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> hashes = new ConcurrentHashMap<>();
 
     @Override
     public V get(String key) {
@@ -83,12 +85,87 @@ public class InMemoryCacheStore<V> implements CacheStore<V> {
         return counter.decrementAndGet();
     }
 
+    @Override
+    public void addToSet(String key, String value) {
+        sets.computeIfAbsent(key, k -> ConcurrentHashMap.newKeySet()).add(value);
+    }
+
+    @Override
+    public void removeFromSet(String key, String value) {
+        Set<String> set = sets.get(key);
+        if (set != null) {
+            set.remove(value);
+            if (set.isEmpty()) {
+                sets.remove(key);
+            }
+        }
+    }
+
+    @Override
+    public Set<String> getSet(String key) {
+        Set<String> set = sets.get(key);
+        return set != null ? new HashSet<>(set) : Collections.emptySet();
+    }
+
+    @Override
+    public void hashSet(String key, String field, V value) {
+        Map<String, Object> hash = hashes.computeIfAbsent(key, k -> new ConcurrentHashMap<>());
+        hash.put(field, value);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Override
+    public V hashGet(String key, String field) {
+        Map<String, Object> hash = hashes.get(key);
+        return hash != null ? (V) hash.get(field) : null;
+    }
+
+    @SuppressWarnings("unchecked")
+    @Override
+    public List<V> hashMutiGet(String key, List<String> fields) {
+        Map<String, Object> hash = hashes.get(key);
+        if (hash == null) return Collections.emptyList();
+        List<V> results = new ArrayList<>(fields.size());
+        for (String field : fields) {
+            results.add((V) hash.get(field));
+        }
+        return results;
+    }
+
+    @Override
+    public void hashDelete(String key, String field) {
+        Map<String, Object> hash = hashes.get(key);
+        if (hash != null) {
+            hash.remove(field);
+        }
+    }
+
+    @Override
+    public Set<String> hashkeys(String key) {
+        Map<String, Object> hash = hashes.get(key);
+        return hash != null ? hash.keySet() : Collections.emptySet();
+    }
+
+    @Override
+    public void hashSetString(String key, String field, String value) {
+        Map<String, Object> hash = hashes.computeIfAbsent(key, k -> new ConcurrentHashMap<>());
+        hash.put(field, value);
+    }
+
+    @Override
+    public String hashGetString(String key, String field) {
+        Map<String, Object> hash = hashes.get(key);
+        return hash != null ? (String) hash.get(field) : null;
+    }
+
     /**
      * 모든 캐시 데이터 삭제 (테스트용)
      */
     public void clear() {
         store.clear();
         counters.clear();
+        sets.clear();
+        hashes.clear();
     }
 
     /**
