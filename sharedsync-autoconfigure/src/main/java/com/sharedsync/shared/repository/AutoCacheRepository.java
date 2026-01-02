@@ -294,7 +294,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             return new RedisCacheStore<>((RedisTemplate<String, DTO>) applicationContext.getBean(redisTemplateBeanName));
         } catch (Exception e) {
             // RedisTemplate도 없으면 임시 InMemory 사용 (개발 편의)
-            System.err.println("[SharedSync] No cache store found, using temporary InMemory cache. Configure sharedsync.cache.type=memory for production.");
             return (CacheStore<DTO>) new InMemoryCacheStore<DTO>();
         }
     }
@@ -495,7 +494,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             try {
                 return loadEntitiesByCriteria(parentId);
             } catch (Exception e) {
-                System.err.println("[SharedSync] Criteria API 로딩 실패: " + e.getMessage());
                 e.printStackTrace();
             }
         }
@@ -664,7 +662,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             return convertToDto(entity);
 
         } catch (Exception e) {
-            System.err.println("[SharedSync] ID로 데이터베이스 로딩 실패: " + id + " - " + e.getMessage());
             return null;
         }
     }
@@ -709,7 +706,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             if (targetType == java.util.UUID.class) return java.util.UUID.fromString(s);
         } catch (Exception e) {
             // fall through to return original value below
-            System.err.println("[SharedSync][DEBUG] convertIdToType failed to convert '" + s + "' to " + targetType + ": " + e.getMessage());
         }
         return idValue;
     }
@@ -822,7 +818,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
         Field targetField = findFieldInHierarchy(dtoClass, fieldName);
         if (targetField == null) {
-            System.err.println("[SharedSync] Field not found: " + fieldName + " in " + dtoClass.getSimpleName());
             return Collections.emptyList();
         }
         targetField.setAccessible(true);
@@ -870,7 +865,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         for (Map.Entry<String, Object> entry : fieldValues.entrySet()) {
             Field field = findFieldInHierarchy(dtoClass, entry.getKey());
             if (field == null) {
-                System.err.println("[SharedSync] Field not found: " + entry.getKey() + " in " + dtoClass.getSimpleName());
                 return Collections.emptyList();
             }
             field.setAccessible(true);
@@ -964,17 +958,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     private Object[] buildEntityConverterParameters(DTO dto) throws Exception {
-        // DTO 전체 내용 출력 (디버그용)
-        System.err.println("[SharedSync][DEBUG] buildEntityConverterParameters for DTO: " + dtoClass.getSimpleName());
-        for (Field field : dtoFields) {
-            try {
-                Object value = field.get(dto);
-                System.err.print("[SharedSync][DEBUG]   " + field.getName() + " = " + value);
-            } catch (Exception e) {
-                // ignore
-            }
-        }
-        
         Class<?>[] parameterTypes = entityConverterMethod.getParameterTypes();
         Object[] params = new Object[parameterTypes.length];
         Type[] genericParameterTypes = entityConverterMethod.getGenericParameterTypes();
@@ -1001,11 +984,9 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                         for (Object id : idList) {
                             try {
                                     Object normalizedId = changeType((ID) id);
-                                    System.err.println("[SharedSync][DEBUG] resolving list element reference: entity=" + elementType.getSimpleName() + ", id=" + normalizedId);
                                     Object ref = entityManager.getReference(elementType, normalizedId);
                                     entities.add(ref);
                                 } catch (Exception e) {
-                                    System.err.println("[SharedSync][DEBUG] failed to resolve list element reference: entity=" + elementType + ", id=" + id + ", err=" + e.getMessage());
                                     // skip missing/invalid ids
                                 }
                         }
@@ -1028,11 +1009,9 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                                 Field relatedIdField = locateEntityIdField(expectedEntityClass);
                                 Class<?> relatedIdType = relatedIdField != null ? relatedIdField.getType() : null;
                                 Object normalized = convertIdToType(relatedIdType, relatedId);
-                                System.err.println("[SharedSync][DEBUG] resolving single reference: paramIndex=" + i + ", entity=" + expectedEntityClass.getSimpleName() + ", id=" + normalized + " (targetIdType=" + relatedIdType + ")");
                                 Object ref = entityManager.getReference(expectedEntityClass, normalized);
                                 params[i] = ref;
                             } catch (Exception e) {
-                                System.err.println("[SharedSync][DEBUG] failed to resolve single reference: paramIndex=" + i + ", entity=" + expectedEntityClass + ", id=" + relatedId + ", err=" + e.getMessage());
                                 params[i] = null;
                             }
                         } else {
@@ -1115,16 +1094,13 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             // 1순위: 필드명 패턴 매칭 (cache + EntityClassName + Id) - 가장 정확함
             String entitySimpleName = entityClass.getSimpleName();
             String patternFieldName = Generator.decapitalizeFirst(entitySimpleName) + "Id";
-            System.err.println("[SharedSync][DEBUG] extractRelatedId: entityClass=" + patternFieldName + ", looking for field=" + patternFieldName);
             Field patternField = findFieldInHierarchy(dtoClass, patternFieldName);
             if (patternField != null) {
                 patternField.setAccessible(true);
                 Object patternValue = patternField.get(dto);
-                System.err.println("[SharedSync][DEBUG] extractRelatedId: found field=" + patternFieldName + ", value=" + patternValue);
                 if (patternValue != null) {
                     return patternValue;
                 }
-            } else {
                 System.err.println("[SharedSync][DEBUG] extractRelatedId: field not found=" + patternFieldName);
             }
 
@@ -1398,7 +1374,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         // 부모가 있을 때
         Object parentIdValue = getParentIdValue(dto);
         if (parentIdValue instanceof Number number && number.longValue() <0) {
-            System.out.println("부모키가 음수라 저장할 수 없습니다");
             return null;
         }
         return saveToDatabase(dto);
@@ -1568,7 +1543,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 }
             }
         } catch (Exception e) {
-            // 검사 중 오류 발생시 로그만 남기고 계속 진행
             System.err.println("[SharedSync][WARN] failed to validate required relations: " + e.getMessage());
         }
 
