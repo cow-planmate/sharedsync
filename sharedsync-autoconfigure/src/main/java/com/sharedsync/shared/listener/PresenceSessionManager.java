@@ -51,10 +51,6 @@ public class PresenceSessionManager {
         presenceStorage.insertTracker(rootId, sessionId, userId, DEFAULT_INDEX);
         presenceStorage.mapSessionToRoot(sessionId, rootId);
 
-        List<Map<String, String>> currentUserList = buildUserList(rootId);
-        System.out.println("[SharedSync][Presence] User Joined - Room: " + rootId + ", User: " + userId + ", Session: " + sessionId);
-        System.out.println("[SharedSync][Presence] Current Tracker State: " + currentUserList);
-
         String channel = presenceRootResolver.getChannel();
 
         String finalNickname = nickname;
@@ -64,7 +60,7 @@ public class PresenceSessionManager {
                 ACTION_CREATE,
                 userId,
                 finalNickname,
-                currentUserList
+                buildUserList(rootId)
         );
     }
 
@@ -82,12 +78,7 @@ public class PresenceSessionManager {
 
         presenceStorage.removeTracker(rootId, sessionId, userId);
 
-        List<Map<String, String>> currentUserList = buildUserList(rootId);
-        System.out.println("[SharedSync][Presence] User Left - Room: " + rootId + ", User: " + userId + ", Session: " + sessionId);
-        System.out.println("[SharedSync][Presence] Current Tracker State: " + currentUserList);
-
         if (!presenceStorage.hasTracker(rootId)) {
-            System.out.println("[SharedSync][Presence] Room " + rootId + " is now empty. Syncing to DB...");
             cacheSyncService.syncToDatabase(rootId);
         }
 
@@ -100,7 +91,7 @@ public class PresenceSessionManager {
                 ACTION_DELETE,
                 userId,
                 nickname,
-                currentUserList
+                buildUserList(rootId)
         );
     }
 
