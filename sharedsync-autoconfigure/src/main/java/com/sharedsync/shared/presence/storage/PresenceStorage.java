@@ -13,9 +13,9 @@ public interface PresenceStorage {
     String getNicknameByUserId(String userId);
     String getUserIdByNickname(String nickname);
 
-    void mapUserToRoot(String rootId, String userId);
-    String getRootIdByUserId(String userId);
-    String removeUserRootMapping(String userId);
+    void mapSessionToRoot(String sessionId, String rootId);
+    String getRootIdBySessionId(String sessionId);
+    String removeSessionRootMapping(String sessionId);
     List<String> getUserIdsInRoom(String rootId);
 
 }

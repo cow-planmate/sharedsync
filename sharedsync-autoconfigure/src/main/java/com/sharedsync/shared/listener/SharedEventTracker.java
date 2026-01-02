@@ -42,6 +42,11 @@ public class SharedEventTracker {
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
         String userId = extractUserId(accessor);
         String sessionId = accessor.getSessionId();
+        
+        if (userId == null) {
+            System.out.println("[SharedSync][Warn] Disconnect event received but userId is null. SessionId: " + sessionId);
+        }
+        
         if (userId != null) {
             presenceSessionManager.handleDisconnect(userId, sessionId);
         }

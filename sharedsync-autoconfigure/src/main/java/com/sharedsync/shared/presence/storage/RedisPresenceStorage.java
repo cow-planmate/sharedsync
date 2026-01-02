@@ -18,7 +18,7 @@ public class RedisPresenceStorage implements PresenceStorage {
     private final RedisTemplate<String, Object> redis;
 
     private static final String TRACKER = "PRESENCE:TRACKER:";
-    private static final String USER_TO_ROOT = "PRESENCE:USER_ROOT:";
+    private static final String SESSION_TO_ROOT = "PRESENCE:SESSION_ROOT:";
     private static final String NICKNAME = "PRESENCE:NICKNAME:";
     private static final String NAME_TO_ID = "PRESENCE:NAME_ID:";
 
@@ -71,19 +71,19 @@ public class RedisPresenceStorage implements PresenceStorage {
     }
 
     @Override
-    public void mapUserToRoot(String rootId, String userId) {
-        redis.opsForValue().set(USER_TO_ROOT + userId, rootId);
+    public void mapSessionToRoot(String sessionId, String rootId) {
+        redis.opsForValue().set(SESSION_TO_ROOT + sessionId, rootId);
     }
 
     @Override
-    public String getRootIdByUserId(String userId) {
-        Object v = redis.opsForValue().get(USER_TO_ROOT + userId);
+    public String getRootIdBySessionId(String sessionId) {
+        Object v = redis.opsForValue().get(SESSION_TO_ROOT + sessionId);
         return v == null ? null : (String) v;
     }
 
     @Override
-    public String removeUserRootMapping(String userId) {
-        Object v = redis.opsForValue().getAndDelete(USER_TO_ROOT + userId);
+    public String removeSessionRootMapping(String sessionId) {
+        Object v = redis.opsForValue().getAndDelete(SESSION_TO_ROOT + sessionId);
         return v == null ? null : (String) v;
     }
 

@@ -19,8 +19,8 @@ public class InMemoryPresenceStorage implements PresenceStorage {
     // rootId -> Map<userId//sessionId, index>
     private final Map<String, Map<String, String>> trackers = new ConcurrentHashMap<>();
     
-    // userId -> rootId
-    private final Map<String, String> userToRoot = new ConcurrentHashMap<>();
+    // sessionId -> rootId
+    private final Map<String, String> sessionToRoot = new ConcurrentHashMap<>();
     
     // userId -> nickname
     private final Map<String, String> userNicknames = new ConcurrentHashMap<>();
@@ -77,18 +77,18 @@ public class InMemoryPresenceStorage implements PresenceStorage {
     }
 
     @Override
-    public void mapUserToRoot(String rootId, String userId) {
-        userToRoot.put(userId, rootId);
+    public void mapSessionToRoot(String sessionId, String rootId) {
+        sessionToRoot.put(sessionId, rootId);
     }
 
     @Override
-    public String getRootIdByUserId(String userId) {
-        return userToRoot.get(userId);
+    public String getRootIdBySessionId(String sessionId) {
+        return sessionToRoot.get(sessionId);
     }
 
     @Override
-    public String removeUserRootMapping(String userId) {
-        return userToRoot.remove(userId);
+    public String removeSessionRootMapping(String sessionId) {
+        return sessionToRoot.remove(sessionId);
     }
 
     @Override
