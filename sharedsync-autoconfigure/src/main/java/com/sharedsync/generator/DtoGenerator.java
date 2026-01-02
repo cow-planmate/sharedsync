@@ -620,6 +620,9 @@ public class DtoGenerator {
                 String parentFieldName = parent.getCacheEntityIdName();
                 String parentFieldType = Generator.denormalizeType(parent.getEntityIdType(), parent.getEntityIdOriginalType());
 
+                if (parent.getTableName() != null) {
+                    fields.append("    @TableName(\"").append(parent.getTableName()).append("\")\n");
+                }
                 fields.append("    @ParentId(")
                         .append(Generator.removePath(parent.getEntityPath()))
                         .append(".class)\n");
@@ -643,6 +646,9 @@ public class DtoGenerator {
                 String fkFieldName = matched.getCacheEntityIdName();
                 String fkFieldType = Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType());
 
+                if (matched.getTableName() != null) {
+                    fields.append("    @TableName(\"").append(matched.getTableName()).append("\")\n");
+                }
                 fields.append("    private ")
                     .append(fkFieldType)
                         .append(" ")
@@ -655,6 +661,9 @@ public class DtoGenerator {
                 String fkFieldNames = matched.getCacheEntityIdName()+"s";
                 String fkFieldType = collectionType + "<" + Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType()) + ">";
 
+                if (matched.getTableName() != null) {
+                    fields.append("    @TableName(\"").append(matched.getTableName()).append("\")\n");
+                }
                 fields.append("    private ")
                     .append(fkFieldType)
                         .append(" ")

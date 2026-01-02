@@ -20,11 +20,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.data.redis.core.RedisTemplate;
 
-import com.sharedsync.generator.Generator;
 import com.sharedsync.shared.annotation.Cache;
 import com.sharedsync.shared.annotation.CacheId;
 import com.sharedsync.shared.annotation.EntityConverter;
 import com.sharedsync.shared.annotation.ParentId;
+import com.sharedsync.shared.annotation.TableName;
 import com.sharedsync.shared.dto.CacheDto;
 
 import jakarta.persistence.EntityManager;
@@ -163,14 +163,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         for (Field field : entityClass.getDeclaredFields()) {
             if (field.getType().equals(parentEntityClass)) {
                 return field.getName();
-            }
-        }
-        
-        // DTO의 parentIdField 이름에서 추론 (예: userShelfBookId → userShelfBook)
-        if (parentIdField != null) {
-            String fieldName = parentIdField.getName();
-            if (fieldName.endsWith("Id")) {
-                return fieldName.substring(0, fieldName.length() - 2);
             }
         }
         
@@ -571,9 +563,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                     if (entitySimple.isEmpty()) continue;
                     String candidate = Character.toLowerCase(entitySimple.charAt(0)) + entitySimple.substring(1);
 
-                    // 예상되는 DB 컬럼명(스네이크 + _id) 예: TransportationCategory -> transportation_category_id
-                    String expectedJoinColumn = toSnakeCase(entitySimple) + "_id";
-
                     for (Field f : getAllFieldsInHierarchy(entityClass)) {
                         String relationName = null;
 
@@ -588,7 +577,9 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                             if (jc != null) {
                                 String jcName = jc.name();
                                 if (jcName != null && !jcName.isBlank()) {
-                                    if (jcName.equalsIgnoreCase(expectedJoinColumn)) {
+                                    // DTO 필드명(예: userId)에서 추출한 candidate(user)와 
+                                    // JoinColumn 이름(user_id)이 유사한지 확인
+                                    if (jcName.toLowerCase().contains(candidate.toLowerCase())) {
                                         relationName = f.getName();
                                     }
                                 }
@@ -1046,21 +1037,20 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
      */
     @SuppressWarnings("unchecked")
     private List<?> extractRelatedIdList(DTO dto, Class<?> elementType) {
-        String elementSimpleName = elementType.getSimpleName();
-        // 필드명 패턴: cache + EntityClassName + Ids (복수형)
-        String patternFieldName = Generator.decapitalizeFirst(elementSimpleName) + "Ids";
-        
-        try {
-            Field patternField = findFieldInHierarchy(dtoClass, patternFieldName);
-            if (patternField != null) {
-                patternField.setAccessible(true);
-                Object value = patternField.get(dto);
-                if (value instanceof List) {
-                    return (List<?>) value;
+        String tableName = getTableName(elementType);
+        for (Field field : getAllFieldsInHierarchy(dtoClass)) {
+            TableName tableNameAnnotation = field.getAnnotation(TableName.class);
+            if (tableNameAnnotation != null && tableNameAnnotation.value().equalsIgnoreCase(tableName)) {
+                field.setAccessible(true);
+                try {
+                    Object value = field.get(dto);
+                    if (value instanceof List) {
+                        return (List<?>) value;
+                    }
+                } catch (IllegalAccessException e) {
+                    // 무시
                 }
             }
-        } catch (IllegalAccessException e) {
-            // 무시
         }
         return null;
     }
@@ -1084,27 +1074,18 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 return null;
             }
 
-            // 엔티티에서 @Id 어노테이션이 붙은 필드 찾기
-            String idFieldName = findIdFieldNameInEntity(entityClass);
-
-            if (idFieldName == null) {
-                return null;
-            }
-
-            // 1순위: 필드명 패턴 매칭 (cache + EntityClassName + Id) - 가장 정확함
-            String entitySimpleName = entityClass.getSimpleName();
-            String patternFieldName = Generator.decapitalizeFirst(entitySimpleName) + "Id";
-            Field patternField = findFieldInHierarchy(dtoClass, patternFieldName);
-            if (patternField != null) {
-                patternField.setAccessible(true);
-                Object patternValue = patternField.get(dto);
-                if (patternValue != null) {
-                    return patternValue;
+            // 0순위: @TableName 어노테이션 매칭 (테이블 이름 기반)
+            String tableName = getTableName(entityClass);
+            for (Field field : getAllFieldsInHierarchy(dtoClass)) {
+                TableName tableNameAnnotation = field.getAnnotation(TableName.class);
+                if (tableNameAnnotation != null && tableNameAnnotation.value().equalsIgnoreCase(tableName)) {
+                    field.setAccessible(true);
+                    Object val = field.get(dto);
+                    if (val != null) return val;
                 }
-                System.err.println("[SharedSync][DEBUG] extractRelatedId: field not found=" + patternFieldName);
             }
 
-            // 2순위: DTO에서 @ParentId(entityClass)가 붙은 필드 찾기
+            // 1순위: DTO에서 @ParentId(entityClass)가 붙은 필드 찾기
             for (Field field : getAllFieldsInHierarchy(dtoClass)) {
                 field.setAccessible(true);
                 
@@ -1115,16 +1096,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                     if (idValue != null) {
                         return idValue;
                     }
-                }
-            }
-
-            // 3순위: DTO에서 엔티티 ID 필드와 같은 이름의 필드 찾기 (마지막 폴백)
-            Field dtoIdField = findFieldInHierarchy(dtoClass, idFieldName);
-            if (dtoIdField != null) {
-                dtoIdField.setAccessible(true);
-                Object idValue = dtoIdField.get(dto);
-                if (idValue != null) {
-                    return idValue;
                 }
             }
 
@@ -1150,37 +1121,15 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     /**
-     * CamelCase (PascalCase) -> snake_case 변환
-     * 예: TransportationCategory -> transportation_category
+     * 엔티티 클래스에서 테이블 이름을 가져옵니다.
+     * @Table 어노테이션이 있으면 해당 이름을 사용하고, 없으면 클래스 이름을 사용합니다.
      */
-    private String toSnakeCase(String input) {
-        if (input == null || input.isEmpty()) return input;
-        StringBuilder sb = new StringBuilder();
-        char[] chars = input.toCharArray();
-        for (int i = 0; i < chars.length; i++) {
-            char c = chars[i];
-            if (Character.isUpperCase(c)) {
-                if (i > 0) sb.append('_');
-                sb.append(Character.toLowerCase(c));
-            } else {
-                sb.append(c);
-            }
+    private String getTableName(Class<?> entityClass) {
+        jakarta.persistence.Table table = entityClass.getAnnotation(jakarta.persistence.Table.class);
+        if (table != null && !table.name().isEmpty()) {
+            return table.name();
         }
-        return sb.toString();
-    }
-
-    /**
-     * 엔티티 클래스에서 @Id 어노테이션이 붙은 필드 이름 찾기
-     */
-    private String findIdFieldNameInEntity(Class<?> entityClass) {
-        // 모든 필드 순회
-        for (Field field : entityClass.getDeclaredFields()) {
-            // @Id 어노테이션 확인
-            if (field.isAnnotationPresent(jakarta.persistence.Id.class)) {
-                return field.getName();
-            }
-        }
-        return null;
+        return entityClass.getSimpleName();
     }
 
     private Field findFieldInHierarchy(Class<?> clazz, String fieldName) {
@@ -1579,7 +1528,12 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             return entity;
         } else {
             // 기존 엔티티 - merge
-            return entityManager.merge(entity);
+            try {
+                return entityManager.merge(entity);
+            } catch (jakarta.persistence.OptimisticLockException | org.hibernate.StaleObjectStateException e) {
+                // 이미 다른 트랜잭션에 의해 수정/삭제된 경우 무시
+                return entity;
+            }
         }
     }
     
@@ -1588,8 +1542,12 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
      */
     private void deleteAllEntities(List<T> entities) {
         for (T entity : entities) {
-            T managed = entityManager.contains(entity) ? entity : entityManager.merge(entity);
-            entityManager.remove(managed);
+            try {
+                T managed = entityManager.contains(entity) ? entity : entityManager.merge(entity);
+                entityManager.remove(managed);
+            } catch (jakarta.persistence.OptimisticLockException | org.hibernate.StaleObjectStateException e) {
+                // 이미 삭제된 경우 무시
+            }
         }
     }
 

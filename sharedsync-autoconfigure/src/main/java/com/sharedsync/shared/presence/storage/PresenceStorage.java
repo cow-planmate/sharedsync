@@ -12,10 +12,16 @@ public interface PresenceStorage {
     void saveUserNickname(String userId, String nickname);
     String getNicknameByUserId(String userId);
     String getUserIdByNickname(String nickname);
+    void removeUserNickname(String userId);
+    boolean isUserActiveAnywhere(String userId);
+    void addActiveSession(String userId, String sessionId);
+    void removeActiveSession(String userId, String sessionId);
 
     void mapSessionToRoot(String sessionId, String rootId);
     String getRootIdBySessionId(String sessionId);
     String removeSessionRootMapping(String sessionId);
     List<String> getUserIdsInRoom(String rootId);
 
+    boolean acquireSyncLock(String rootId);
+    void releaseSyncLock(String rootId);
 }

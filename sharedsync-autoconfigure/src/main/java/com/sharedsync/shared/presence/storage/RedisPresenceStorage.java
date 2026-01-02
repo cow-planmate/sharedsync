@@ -21,6 +21,8 @@ public class RedisPresenceStorage implements PresenceStorage {
     private static final String SESSION_TO_ROOT = "PRESENCE:SESSION_ROOT:";
     private static final String NICKNAME = "PRESENCE:NICKNAME:";
     private static final String NAME_TO_ID = "PRESENCE:NAME_ID:";
+    private static final String USER_SESSIONS = "PRESENCE:USER_SESSIONS:";
+    private static final String SYNC_LOCK = "PRESENCE:SYNC_LOCK:";
 
     @Override
     public boolean hasTracker(String rootId) {
@@ -71,6 +73,32 @@ public class RedisPresenceStorage implements PresenceStorage {
     }
 
     @Override
+    public void removeUserNickname(String userId) {
+        String nickname = getNicknameByUserId(userId);
+        if (nickname != null) {
+            redis.delete(NAME_TO_ID + nickname);
+        }
+        redis.delete(NICKNAME + userId);
+        redis.delete(USER_SESSIONS + userId);
+    }
+
+    @Override
+    public boolean isUserActiveAnywhere(String userId) {
+        Long size = redis.opsForSet().size(USER_SESSIONS + userId);
+        return size != null && size > 0;
+    }
+
+    @Override
+    public void addActiveSession(String userId, String sessionId) {
+        redis.opsForSet().add(USER_SESSIONS + userId, sessionId);
+    }
+
+    @Override
+    public void removeActiveSession(String userId, String sessionId) {
+        redis.opsForSet().remove(USER_SESSIONS + userId, sessionId);
+    }
+
+    @Override
     public void mapSessionToRoot(String sessionId, String rootId) {
         redis.opsForValue().set(SESSION_TO_ROOT + sessionId, rootId);
     }
@@ -98,6 +126,16 @@ public class RedisPresenceStorage implements PresenceStorage {
             list.add(userId);
         }
         return list;
+    }
+
+    @Override
+    public boolean acquireSyncLock(String rootId) {
+        return Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(SYNC_LOCK + rootId, "locked", java.time.Duration.ofSeconds(30)));
+    }
+
+    @Override
+    public void releaseSyncLock(String rootId) {
+        redis.delete(SYNC_LOCK + rootId);
     }
 
 }

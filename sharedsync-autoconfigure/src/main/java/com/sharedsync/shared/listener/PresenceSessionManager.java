@@ -50,6 +50,7 @@ public class PresenceSessionManager {
 
         presenceStorage.insertTracker(rootId, sessionId, userId, DEFAULT_INDEX);
         presenceStorage.mapSessionToRoot(sessionId, rootId);
+        presenceStorage.addActiveSession(userId, sessionId);
 
         String channel = presenceRootResolver.getChannel();
 
@@ -69,17 +70,40 @@ public class PresenceSessionManager {
      * 연결 해제 시 (퇴장)
      */
     public void handleDisconnect(String userId, String sessionId) {
+        String rootId = presenceStorage.removeSessionRootMapping(sessionId);
+        if (rootId == null || rootId.isBlank()) return;
+
         if (!authProperties.isEnabled()) {
             userId = "ws-" + sessionId;
         }
 
-        String rootId = presenceStorage.removeSessionRootMapping(sessionId);
-        if (rootId == null || rootId.isBlank()) return;
+        if (userId == null) {
+            // 트래커에서 해당 세션에 매핑된 userId 찾기
+            Map<String, String> entries = presenceStorage.getTrackerEntries(rootId);
+            for (String key : entries.keySet()) {
+                if (key.endsWith("//" + sessionId)) {
+                    userId = key.split("//")[0];
+                    break;
+                }
+            }
+        }
+
+        if (userId == null) return;
 
         presenceStorage.removeTracker(rootId, sessionId, userId);
+        presenceStorage.removeActiveSession(userId, sessionId);
 
         if (!presenceStorage.hasTracker(rootId)) {
-            cacheSyncService.syncToDatabase(rootId);
+            if (presenceStorage.acquireSyncLock(rootId)) {
+                try {
+                    // 락 획득 후 다시 한번 확인 (그 사이에 누가 들어왔을 수 있음)
+                    if (!presenceStorage.hasTracker(rootId)) {
+                        cacheSyncService.syncToDatabase(rootId);
+                    }
+                } finally {
+                    presenceStorage.releaseSyncLock(rootId);
+                }
+            }
         }
 
         String channel = presenceRootResolver.getChannel();
@@ -93,15 +117,23 @@ public class PresenceSessionManager {
                 nickname,
                 buildUserList(rootId)
         );
+
+        // 다른 방이나 다른 세션에 여전히 남아있는지 확인 후 삭제
+        if (!presenceStorage.isUserActiveAnywhere(userId)) {
+            presenceStorage.removeUserNickname(userId);
+        }
     }
 
     private List<Map<String, String>> buildUserList(String rootId) {
         return presenceStorage.getUserIdsInRoom(rootId)
                 .stream()
-                .map(id -> Map.of(
-                        "uid", id,
-                        "userNickname", presenceStorage.getNicknameByUserId(id)
-                ))
+                .map(id -> {
+                    String nickname = presenceStorage.getNicknameByUserId(id);
+                    Map<String, String> userMap = new java.util.HashMap<>();
+                    userMap.put("uid", id);
+                    userMap.put("userNickname", nickname != null ? nickname : "");
+                    return userMap;
+                })
                 .toList();
     }
 

@@ -28,6 +28,12 @@ public class InMemoryPresenceStorage implements PresenceStorage {
     // nickname -> userId
     private final Map<String, String> nicknameToUser = new ConcurrentHashMap<>();
 
+    // userId -> Set<sessionId>
+    private final Map<String, java.util.Set<String>> userSessions = new ConcurrentHashMap<>();
+
+    // rootId -> lock
+    private final java.util.Set<String> syncLocks = ConcurrentHashMap.newKeySet();
+
     @Override
     public boolean hasTracker(String rootId) {
         Map<String, String> tracker = trackers.get(rootId);
@@ -77,6 +83,38 @@ public class InMemoryPresenceStorage implements PresenceStorage {
     }
 
     @Override
+    public void removeUserNickname(String userId) {
+        String nickname = userNicknames.remove(userId);
+        if (nickname != null) {
+            nicknameToUser.remove(nickname);
+        }
+        userSessions.remove(userId);
+    }
+
+    @Override
+    public boolean isUserActiveAnywhere(String userId) {
+        java.util.Set<String> sessions = userSessions.get(userId);
+        return sessions != null && !sessions.isEmpty();
+    }
+
+    @Override
+    public void addActiveSession(String userId, String sessionId) {
+        userSessions.computeIfAbsent(userId, k -> ConcurrentHashMap.newKeySet())
+                .add(sessionId);
+    }
+
+    @Override
+    public void removeActiveSession(String userId, String sessionId) {
+        java.util.Set<String> sessions = userSessions.get(userId);
+        if (sessions != null) {
+            sessions.remove(sessionId);
+            if (sessions.isEmpty()) {
+                userSessions.remove(userId);
+            }
+        }
+    }
+
+    @Override
     public void mapSessionToRoot(String sessionId, String rootId) {
         sessionToRoot.put(sessionId, rootId);
     }
@@ -103,5 +141,15 @@ public class InMemoryPresenceStorage implements PresenceStorage {
             userIds.add(userId);
         }
         return userIds;
+    }
+
+    @Override
+    public boolean acquireSyncLock(String rootId) {
+        return syncLocks.add(rootId);
+    }
+
+    @Override
+    public void releaseSyncLock(String rootId) {
+        syncLocks.remove(rootId);
     }
 }

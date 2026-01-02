@@ -5,7 +5,6 @@ import java.util.List;
 import org.springframework.context.event.EventListener;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.stereotype.Component;
-import org.springframework.web.socket.messaging.SessionConnectEvent;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 import org.springframework.web.socket.messaging.SessionSubscribeEvent;
 
@@ -17,13 +16,6 @@ public class SharedEventTracker {
 
     private static final String USER_ID = "userId";
     private final PresenceSessionManager presenceSessionManager;
-
-
-    @EventListener
-    public void handleSubscribeEvent(SessionConnectEvent event) {
-        StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
-        String sessionId = accessor.getSessionId();
-    }
 
     @EventListener
     public void handleSubscribeEvent(SessionSubscribeEvent event) {
@@ -43,9 +35,7 @@ public class SharedEventTracker {
         String userId = extractUserId(accessor);
         String sessionId = accessor.getSessionId();
         
-        if (userId != null) {
-            presenceSessionManager.handleDisconnect(userId, sessionId);
-        }
+        presenceSessionManager.handleDisconnect(userId, sessionId);
     }
 
     private String extractUserId(StompHeaderAccessor accessor) {

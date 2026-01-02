@@ -63,6 +63,7 @@ public class Generator extends AbstractProcessor {
         private String entityIdName;
         private String cacheEntityIdName;
         private String entityIdOriginalType;
+        private String tableName;
     }
 
     @Getter
@@ -261,7 +262,19 @@ public class Generator extends AbstractProcessor {
                     }
 
                     if (targetDeclared != null) {
-                        for (Element rf : ((TypeElement) targetDeclared.asElement()).getEnclosedElements()) {
+                        TypeElement targetElement = (TypeElement) targetDeclared.asElement();
+                        
+                        // 테이블 이름 추출
+                        jakarta.persistence.Table tableAnn = targetElement.getAnnotation(jakarta.persistence.Table.class);
+                        if (tableAnn != null && !tableAnn.name().isEmpty()) {
+                            related.setTableName(tableAnn.name());
+                        } else {
+                            // 기본값: 클래스 이름을 snake_case로 (간단히 구현)
+                            String simpleName = targetElement.getSimpleName().toString();
+                            related.setTableName(toSnakeCase(simpleName));
+                        }
+
+                        for (Element rf : targetElement.getEnclosedElements()) {
                             if (rf.getAnnotation(jakarta.persistence.Id.class) != null) {
                                 related.setEntityIdType(normalizeType(rf.asType().toString()));
                                 related.setEntityIdName(rf.getSimpleName().toString());
@@ -339,6 +352,22 @@ public class Generator extends AbstractProcessor {
     public static String decapitalizeFirst(String str) {
         if (str == null || str.isEmpty()) return "";
         return str.substring(0, 1).toLowerCase() + str.substring(1);
+    }
+
+    public static String toSnakeCase(String input) {
+        if (input == null || input.isEmpty()) return input;
+        StringBuilder sb = new StringBuilder();
+        char[] chars = input.toCharArray();
+        for (int i = 0; i < chars.length; i++) {
+            char c = chars[i];
+            if (Character.isUpperCase(c)) {
+                if (i > 0) sb.append('_');
+                sb.append(Character.toLowerCase(c));
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     public static String removePath(String fullPath) {
