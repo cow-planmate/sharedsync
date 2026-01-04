@@ -24,17 +24,28 @@ public class FrameworkContext implements ApplicationContextAware {
         if (initialized) return;
 
         try {
-            String mainClassName = applicationContext.getEnvironment()
-                    .getProperty("sun.java.command");
+            // 1. @SpringBootApplication 어노테이션이 붙은 빈을 찾아 패키지 경로 추출
+            String[] beanNames = applicationContext.getBeanNamesForAnnotation(org.springframework.boot.autoconfigure.SpringBootApplication.class);
+            if (beanNames.length > 0) {
+                Object bootApp = applicationContext.getBean(beanNames[0]);
+                Package bootPackage = bootApp.getClass().getPackage();
+                if (bootPackage != null) {
+                    basePackage = bootPackage.getName();
+                }
+            } else {
+                // 2. fallback: sun.java.command (테스트 환경 등에서 유효할 수 있음)
+                String mainClassName = applicationContext.getEnvironment()
+                        .getProperty("sun.java.command");
 
-            if (mainClassName != null) {
-                // "MainClass arg1 arg2 ..." 형식일 수 있으니 분리
-                mainClassName = mainClassName.split(" ")[0];
-                Class<?> mainClass = Class.forName(mainClassName);
+                if (mainClassName != null) {
+                    // "MainClass arg1 arg2 ..." 형식일 수 있으니 분리
+                    mainClassName = mainClassName.split(" ")[0];
+                    Class<?> mainClass = Class.forName(mainClassName);
 
-                Package mainPackage = mainClass.getPackage();
-                if (mainPackage != null) {
-                    basePackage = mainPackage.getName();
+                    Package mainPackage = mainClass.getPackage();
+                    if (mainPackage != null) {
+                        basePackage = mainPackage.getName();
+                    }
                 }
             }
         } catch (Exception ignored) {

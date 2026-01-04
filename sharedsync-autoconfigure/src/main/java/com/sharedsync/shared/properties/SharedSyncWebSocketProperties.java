@@ -22,4 +22,23 @@ public class SharedSyncWebSocketProperties {
      * Allowed Origins
      */
     private List<String> allowedOrigins = List.of("*");
+
+    /**
+     * Redis Sync Settings
+     */
+    private RedisSync redisSync = new RedisSync();
+
+    @Getter
+    @Setter
+    public static class RedisSync {
+        /**
+         * Enable Redis Pub/Sub for WebSocket synchronization across multiple servers
+         */
+        private boolean enabled = false;
+
+        /**
+         * Redis channel name for synchronization
+         */
+        private String channel = "sharedsync:websocket:sync";
+    }
 }
