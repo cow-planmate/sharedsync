@@ -8,8 +8,8 @@ import org.springframework.stereotype.Service;
 import com.sharedsync.shared.presence.core.PresenceBroadcaster;
 import com.sharedsync.shared.presence.core.PresenceRootResolver;
 import com.sharedsync.shared.presence.core.UserProvider;
-import com.sharedsync.shared.presence.storage.PresenceStorage;
 import com.sharedsync.shared.properties.SharedSyncAuthProperties;
+import com.sharedsync.shared.storage.PresenceStorage;
 import com.sharedsync.shared.sync.CacheSyncService;
 
 import lombok.RequiredArgsConstructor;

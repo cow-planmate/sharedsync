@@ -1,4 +1,4 @@
-package com.sharedsync.shared.presence.storage;
+package com.sharedsync.shared.storage;
 
 import java.util.ArrayList;
 import java.util.List;

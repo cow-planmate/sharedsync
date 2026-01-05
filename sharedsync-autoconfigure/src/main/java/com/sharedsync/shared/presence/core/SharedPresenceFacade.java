@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import com.sharedsync.shared.presence.dto.PresenceSnapshot;
-import com.sharedsync.shared.presence.storage.PresenceStorage;
+import com.sharedsync.shared.storage.PresenceStorage;
 
 import java.util.*;
 

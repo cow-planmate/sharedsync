@@ -3,8 +3,9 @@ package com.sharedsync.shared.autoConfig;
 import com.sharedsync.shared.presence.core.DummyUserProvider;
 import com.sharedsync.shared.presence.core.SharedPresenceFacade;
 import com.sharedsync.shared.presence.core.UserProvider;
-import com.sharedsync.shared.presence.storage.PresenceStorage;
 import com.sharedsync.shared.properties.SharedSyncPresenceProperties;
+import com.sharedsync.shared.storage.PresenceStorage;
+
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
