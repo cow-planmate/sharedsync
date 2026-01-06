@@ -19,6 +19,7 @@ import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.connection.RedisPassword;
 import org.springframework.data.redis.connection.RedisSentinelConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -93,7 +94,8 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
             }
             
             if (password != null && !password.isEmpty()) {
-                sentinelConfig.setPassword(password);
+                sentinelConfig.setPassword(RedisPassword.of(password));
+                sentinelConfig.setSentinelPassword(RedisPassword.of(password));
             }
             return new LettuceConnectionFactory(sentinelConfig);
         }
