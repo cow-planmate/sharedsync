@@ -28,9 +28,10 @@ public class PresenceBroadcaster {
         payload.put("uid", uid);
         payload.put("userNickname", nickname);
         payload.put("users", users); // 전체 리스트 추가
+        payload.put("action", action); // 액션 추가
 
         redisSyncService.publish(
-                String.format("/topic/%s/%s/%s/presence", entityName, roomId, action),
+                String.format("/topic/%s/%s", entityName, roomId),
                 payload
         );
     }

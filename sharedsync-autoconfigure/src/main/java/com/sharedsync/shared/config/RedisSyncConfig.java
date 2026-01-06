@@ -4,10 +4,12 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.data.redis.listener.adapter.MessageListenerAdapter;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sharedsync.shared.properties.SharedSyncWebSocketProperties;
@@ -35,7 +37,23 @@ public class RedisSyncConfig {
     }
 
     @Bean
-    public MessageListenerAdapter listenerAdapter(RedisSyncService redisSyncService, ObjectMapper objectMapper) {
+    public RedisTemplate<String, RedisSyncMessage> redisSyncTemplate(
+            RedisConnectionFactory connectionFactory
+    ) {
+        RedisTemplate<String, RedisSyncMessage> template = new RedisTemplate<>();
+        template.setConnectionFactory(connectionFactory);
+        template.setKeySerializer(new StringRedisSerializer());
+        
+        // Use a clean ObjectMapper (without DefaultTyping) to avoid metadata in JSON
+        Jackson2JsonRedisSerializer<RedisSyncMessage> serializer = 
+                new Jackson2JsonRedisSerializer<>(new ObjectMapper(), RedisSyncMessage.class);
+        template.setValueSerializer(serializer);
+        return template;
+    }
+
+    @Bean
+    public MessageListenerAdapter listenerAdapter(RedisSyncService redisSyncService) {
+        ObjectMapper cleanMapper = new ObjectMapper();
         MessageListenerAdapter adapter = new MessageListenerAdapter(new Object() {
             @SuppressWarnings("unused")
             public void handleMessage(Object message) {
@@ -44,9 +62,9 @@ public class RedisSyncConfig {
                     if (message instanceof RedisSyncMessage) {
                         syncMessage = (RedisSyncMessage) message;
                     } else if (message instanceof byte[]) {
-                        syncMessage = objectMapper.readValue((byte[]) message, RedisSyncMessage.class);
+                        syncMessage = cleanMapper.readValue((byte[]) message, RedisSyncMessage.class);
                     } else {
-                        syncMessage = objectMapper.convertValue(message, RedisSyncMessage.class);
+                        syncMessage = cleanMapper.convertValue(message, RedisSyncMessage.class);
                     }
                     redisSyncService.handleMessage(syncMessage);
                 } catch (Exception e) {
@@ -55,7 +73,8 @@ public class RedisSyncConfig {
             }
         }, "handleMessage");
         
-        Jackson2JsonRedisSerializer<RedisSyncMessage> serializer = new Jackson2JsonRedisSerializer<>(objectMapper, RedisSyncMessage.class);
+        Jackson2JsonRedisSerializer<RedisSyncMessage> serializer = 
+                new Jackson2JsonRedisSerializer<>(cleanMapper, RedisSyncMessage.class);
         adapter.setSerializer(serializer);
         return adapter;
     }

@@ -14,7 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class RedisSyncService {
 
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final RedisTemplate<String, RedisSyncMessage> redisSyncTemplate;
     private final SimpMessagingTemplate messagingTemplate;
     private final SharedSyncWebSocketProperties props;
 
@@ -34,7 +34,7 @@ public class RedisSyncService {
                 .payload(payload)
                 .build();
 
-        redisTemplate.convertAndSend(props.getRedisSync().getChannel(), message);
+        redisSyncTemplate.convertAndSend(props.getRedisSync().getChannel(), message);
     }
 
     /**

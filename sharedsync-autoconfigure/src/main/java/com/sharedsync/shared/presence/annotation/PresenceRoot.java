@@ -10,7 +10,7 @@ import java.lang.annotation.Target;
 public @interface PresenceRoot {
 
     /** WebSocket 채널명 */
-    String channel();
+    String channel() default "presence";
 
     /** root 엔터티의 식별자 필드명 */
     String idField();
