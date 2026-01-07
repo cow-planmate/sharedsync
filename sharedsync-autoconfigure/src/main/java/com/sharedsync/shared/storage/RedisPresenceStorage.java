@@ -19,8 +19,7 @@ public class RedisPresenceStorage implements PresenceStorage {
 
     private static final String TRACKER = "PRESENCE:TRACKER:";
     private static final String SESSION_TO_ROOT = "PRESENCE:SESSION_ROOT:";
-    private static final String NICKNAME = "PRESENCE:NICKNAME:";
-    private static final String NAME_TO_ID = "PRESENCE:NAME_ID:";
+    private static final String USER_INFO = "PRESENCE:USER_INFO:";
     private static final String USER_SESSIONS = "PRESENCE:USER_SESSIONS:";
     private static final String SYNC_LOCK = "PRESENCE:SYNC_LOCK:";
 
@@ -56,29 +55,24 @@ public class RedisPresenceStorage implements PresenceStorage {
     }
 
     @Override
-    public void saveUserNickname(String userId, String nickname) {
-        redis.opsForValue().set(NICKNAME + userId, nickname);
-        redis.opsForValue().set(NAME_TO_ID + nickname, userId);
+    public void saveUserInfo(String userId, Map<String, Object> userInfo) {
+        redis.opsForHash().putAll(USER_INFO + userId, userInfo);
     }
 
     @Override
-    public String getNicknameByUserId(String userId) {
-        return (String) redis.opsForValue().get(NICKNAME + userId);
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getUserInfoByUserId(String userId) {
+        Map<Object, Object> entries = redis.opsForHash().entries(USER_INFO + userId);
+        if (entries.isEmpty()) return null;
+        
+        Map<String, Object> result = new java.util.HashMap<>();
+        entries.forEach((k, v) -> result.put(k.toString(), v));
+        return result;
     }
 
     @Override
-    public String getUserIdByNickname(String nickname) {
-        Object v = redis.opsForValue().get(NAME_TO_ID + nickname);
-        return v == null ? null : (String) v;
-    }
-
-    @Override
-    public void removeUserNickname(String userId) {
-        String nickname = getNicknameByUserId(userId);
-        if (nickname != null) {
-            redis.delete(NAME_TO_ID + nickname);
-        }
-        redis.delete(NICKNAME + userId);
+    public void removeUserInfo(String userId) {
+        redis.delete(USER_INFO + userId);
         redis.delete(USER_SESSIONS + userId);
     }
 

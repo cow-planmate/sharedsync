@@ -1,12 +1,17 @@
 package com.sharedsync.shared.presence.core;
 
-import lombok.RequiredArgsConstructor;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import org.springframework.stereotype.Component;
 
 import com.sharedsync.shared.presence.dto.PresenceSnapshot;
 import com.sharedsync.shared.storage.PresenceStorage;
 
-import java.util.*;
+import lombok.RequiredArgsConstructor;
 
 @Component
 @RequiredArgsConstructor
@@ -28,14 +33,14 @@ public class SharedPresenceFacade {
             String userId = rawKey.contains("//") ? rawKey.split("//")[0] : rawKey;
 
             String dayIndex = e.getValue();
-            String nickname = storage.getNicknameByUserId(userId);
+            Map<String, Object> userInfo = storage.getUserInfoByUserId(userId);
 
             Map<String, Object> attr = new HashMap<>();
             attr.put("dayIndex", dayIndex);
 
             snapshots.add(new PresenceSnapshot(
                     userId,
-                    nickname,
+                    userInfo,
                     attr
             ));
         }

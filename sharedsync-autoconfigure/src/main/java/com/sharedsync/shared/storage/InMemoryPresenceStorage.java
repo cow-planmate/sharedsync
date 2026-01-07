@@ -22,11 +22,8 @@ public class InMemoryPresenceStorage implements PresenceStorage {
     // sessionId -> rootId
     private final Map<String, String> sessionToRoot = new ConcurrentHashMap<>();
     
-    // userId -> nickname
-    private final Map<String, String> userNicknames = new ConcurrentHashMap<>();
-    
-    // nickname -> userId
-    private final Map<String, String> nicknameToUser = new ConcurrentHashMap<>();
+    // userId -> userInfo
+    private final Map<String, Map<String, Object>> userInfos = new ConcurrentHashMap<>();
 
     // userId -> Set<sessionId>
     private final Map<String, java.util.Set<String>> userSessions = new ConcurrentHashMap<>();
@@ -67,27 +64,18 @@ public class InMemoryPresenceStorage implements PresenceStorage {
     }
 
     @Override
-    public void saveUserNickname(String userId, String nickname) {
-        userNicknames.put(userId, nickname);
-        nicknameToUser.put(nickname, userId);
+    public void saveUserInfo(String userId, Map<String, Object> userInfo) {
+        userInfos.put(userId, userInfo);
     }
 
     @Override
-    public String getNicknameByUserId(String userId) {
-        return userNicknames.get(userId);
+    public Map<String, Object> getUserInfoByUserId(String userId) {
+        return userInfos.get(userId);
     }
 
     @Override
-    public String getUserIdByNickname(String nickname) {
-        return nicknameToUser.get(nickname);
-    }
-
-    @Override
-    public void removeUserNickname(String userId) {
-        String nickname = userNicknames.remove(userId);
-        if (nickname != null) {
-            nicknameToUser.remove(nickname);
-        }
+    public void removeUserInfo(String userId) {
+        userInfos.remove(userId);
         userSessions.remove(userId);
     }
 

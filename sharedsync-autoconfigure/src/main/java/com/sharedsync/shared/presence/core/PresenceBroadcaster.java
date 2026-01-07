@@ -21,12 +21,12 @@ public class PresenceBroadcaster {
             String roomId,
             String action,
             String uid,
-            String nickname,
-            List<Map<String, String>> users
+            Map<String, Object> userInfo,
+            List<Map<String, Object>> users
     ) {
         Map<String, Object> payload = new HashMap<>();
         payload.put("uid", uid);
-        payload.put("userNickname", nickname);
+        payload.put("userInfo", userInfo);
         payload.put("users", users); // 전체 리스트 추가
         payload.put("action", action); // 액션 추가
 

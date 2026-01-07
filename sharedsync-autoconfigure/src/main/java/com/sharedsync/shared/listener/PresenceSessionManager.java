@@ -42,10 +42,12 @@ public class PresenceSessionManager {
             cacheInitializer.initializeHierarchy(rootId);
         }
 
-        String nickname = presenceStorage.getNicknameByUserId(userId);
-        if (nickname == null || nickname.isBlank()) {
-            nickname = userProvider.findNicknameByUserId(userId);
-            if (nickname != null) presenceStorage.saveUserNickname(userId, nickname);
+        Map<String, Object> userInfo = presenceStorage.getUserInfoByUserId(userId);
+        if (userInfo == null || userInfo.isEmpty()) {
+            userInfo = userProvider.findUserInfoByUserId(userId);
+            if (userInfo != null && !userInfo.isEmpty()) {
+                presenceStorage.saveUserInfo(userId, userInfo);
+            }
         }
 
         presenceStorage.insertTracker(rootId, sessionId, userId, DEFAULT_INDEX);
@@ -54,13 +56,12 @@ public class PresenceSessionManager {
 
         String channel = presenceRootResolver.getChannel();
 
-        String finalNickname = nickname;
         presenceBroadcaster.broadcast(
                 channel,
                 rootId,
                 ACTION_CREATE,
                 userId,
-                finalNickname,
+                userInfo,
                 buildUserList(rootId)
         );
     }
@@ -107,31 +108,31 @@ public class PresenceSessionManager {
         }
 
         String channel = presenceRootResolver.getChannel();
-        String nickname = presenceStorage.getNicknameByUserId(userId);
+        Map<String, Object> userInfo = presenceStorage.getUserInfoByUserId(userId);
 
         presenceBroadcaster.broadcast(
                 channel,
                 rootId,
                 ACTION_DELETE,
                 userId,
-                nickname,
+                userInfo,
                 buildUserList(rootId)
         );
 
         // 다른 방이나 다른 세션에 여전히 남아있는지 확인 후 삭제
         if (!presenceStorage.isUserActiveAnywhere(userId)) {
-            presenceStorage.removeUserNickname(userId);
+            presenceStorage.removeUserInfo(userId);
         }
     }
 
-    private List<Map<String, String>> buildUserList(String rootId) {
+    private List<Map<String, Object>> buildUserList(String rootId) {
         return presenceStorage.getUserIdsInRoom(rootId)
                 .stream()
                 .map(id -> {
-                    String nickname = presenceStorage.getNicknameByUserId(id);
-                    Map<String, String> userMap = new java.util.HashMap<>();
+                    Map<String, Object> userInfo = presenceStorage.getUserInfoByUserId(id);
+                    Map<String, Object> userMap = new java.util.HashMap<>();
                     userMap.put("uid", id);
-                    userMap.put("userNickname", nickname != null ? nickname : "");
+                    userMap.put("userInfo", userInfo != null ? userInfo : new java.util.HashMap<>());
                     return userMap;
                 })
                 .toList();

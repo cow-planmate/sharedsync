@@ -4,6 +4,6 @@ import java.util.Map;
 
 public record PresenceSnapshot(
         String userId,
-        String nickname,
+        Map<String, Object> userInfo,
         Map<String, Object> attributes
 ) {}

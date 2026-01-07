@@ -17,11 +17,12 @@ import java.lang.annotation.Target;
 public @interface PresenceUser {
     /**
      * 유저 식별자 필드 이름 (예: "userId")
+     * 명시하지 않을 경우 @Id 어노테이션이 붙은 필드를 자동으로 찾습니다.
      */
-    String idField();
+    String idField() default "";
 
     /**
-     * 유저 닉네임 필드 이름 (예: "nickname")
+     * Presence 정보에 포함할 필드 리스트 (예: {"nickname", "email"})
      */
-    String nameField();
+    String[] fields() default {"nickname"};
 }

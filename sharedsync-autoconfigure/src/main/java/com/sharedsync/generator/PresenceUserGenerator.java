@@ -42,7 +42,7 @@ public class PresenceUserGenerator extends AbstractProcessor {
         private String entityName;
         private String idFieldName;
         private String idFieldType;    // [추가됨] ID 필드의 타입 (ex: String, Long)
-        private String nameFieldName;
+        private String[] fields;
 
         private String repositoryPath;
         private String repositoryName;
@@ -71,12 +71,10 @@ public class PresenceUserGenerator extends AbstractProcessor {
 
             info.setEntityPath(entityPath);
             info.setEntityName(entityName);
-            info.setIdFieldName(ann.idField());
-            info.setNameFieldName(ann.nameField());
+            info.setFields(ann.fields());
 
-            // [추가됨] ID 필드 타입 탐색
-            String idFieldType = findIdFieldType(element, ann.idField());
-            info.setIdFieldType(idFieldType);
+            // [추가됨] ID 필드 탐색 및 타입 확인
+            findAndSetIdField(element, ann.idField(), info);
 
             // Repository 탐색
             findRepository(info, roundEnv);
@@ -97,20 +95,37 @@ public class PresenceUserGenerator extends AbstractProcessor {
     }
 
     // =======================
-    //   필드 타입 탐색 [추가됨]
+    //   필드 타입 탐색 [수정됨]
     // =======================
 
-    private String findIdFieldType(Element element, String idFieldName) {
+    private void findAndSetIdField(Element element, String idFieldName, PresenceUserInformation info) {
         // 엔티티 내부의 모든 요소(필드, 메서드 등)를 순회
         for (Element enclosed : element.getEnclosedElements()) {
-            // 필드(Field)이면서 이름이 idFieldName과 같은지 확인
-            if (enclosed.getKind().isField() && enclosed.getSimpleName().toString().equals(idFieldName)) {
-                // 타입의 전체 경로에서 패키지명을 떼고 반환 (ex: java.lang.Long -> Long)
-                return removePath(enclosed.asType().toString());
+            if (enclosed.getKind().isField()) {
+                boolean isTarget = false;
+                if (idFieldName == null || idFieldName.isEmpty()) {
+                    // @Id 어노테이션이 있는지 확인
+                    for (var annotationMirror : enclosed.getAnnotationMirrors()) {
+                        String annType = annotationMirror.getAnnotationType().toString();
+                        if (annType.endsWith(".Id")) { // javax.persistence.Id, jakarta.persistence.Id, org.springframework.data.annotation.Id 등
+                            isTarget = true;
+                            break;
+                        }
+                    }
+                } else if (enclosed.getSimpleName().toString().equals(idFieldName)) {
+                    isTarget = true;
+                }
+
+                if (isTarget) {
+                    info.setIdFieldName(enclosed.getSimpleName().toString());
+                    info.setIdFieldType(removePath(enclosed.asType().toString()));
+                    return;
+                }
             }
         }
         // 찾지 못했을 경우 기본값
-        return "String";
+        info.setIdFieldName(idFieldName != null && !idFieldName.isEmpty() ? idFieldName : "id");
+        info.setIdFieldType("String");
     }
 
     // =======================
@@ -165,7 +180,11 @@ public class PresenceUserGenerator extends AbstractProcessor {
             JavaFileObject file = processingEnv.getFiler().createSourceFile(info.getProviderFullPath());
             try (Writer writer = file.openWriter()) {
 
-                String getter = "get" + capitalizeFirst(info.getNameFieldName()) + "()";
+                StringBuilder mapBuilder = new StringBuilder();
+                for (String field : info.getFields()) {
+                    String getter = "get" + capitalizeFirst(field) + "()";
+                    mapBuilder.append("                                            info.put(\"").append(field).append("\", user.").append(getter).append(");\n");
+                }
                 
                 // ID 타입에 따른 변환 로직 (String -> Long 등)
                 String idConversion = getChangeType(info.getIdFieldType());
@@ -177,6 +196,8 @@ public class PresenceUserGenerator extends AbstractProcessor {
                         import com.sharedsync.shared.presence.core.UserProvider;
                         import lombok.RequiredArgsConstructor;
                         import org.springframework.stereotype.Component;
+                        import java.util.Map;
+                        import java.util.HashMap;
 
                         @Component
                         @RequiredArgsConstructor
@@ -185,10 +206,13 @@ public class PresenceUserGenerator extends AbstractProcessor {
                             private final %s userRepository;
 
                             @Override
-                            public String findNicknameByUserId(String userId) {
+                            public Map<String, Object> findUserInfoByUserId(String userId) {
                                 return userRepository.findById(%s)
-                                        .map(user -> user.%s)
-                                        .orElse("Unknown");
+                                        .map(user -> {
+                                            Map<String, Object> info = new HashMap<>();
+                        %s                    return info;
+                                        })
+                                        .orElse(new HashMap<>());
                             }
                         }
                         """.formatted(
@@ -197,7 +221,7 @@ public class PresenceUserGenerator extends AbstractProcessor {
                         info.getProviderClassName(),    // 3. class name
                         info.getRepositoryName(),       // 4. field type
                         idConversion,                   // 5. findById arg
-                        getter                          // 6. map getter
+                        mapBuilder.toString()           // 6. map population
                 ));
             }
         } catch (IOException e) {

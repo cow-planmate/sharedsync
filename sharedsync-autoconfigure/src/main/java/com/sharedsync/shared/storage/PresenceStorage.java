@@ -9,10 +9,9 @@ public interface PresenceStorage {
     void removeTracker(String rootId, String sessionId, String userId);
     Map<String, String> getTrackerEntries(String rootId);
 
-    void saveUserNickname(String userId, String nickname);
-    String getNicknameByUserId(String userId);
-    String getUserIdByNickname(String nickname);
-    void removeUserNickname(String userId);
+    void saveUserInfo(String userId, Map<String, Object> userInfo);
+    Map<String, Object> getUserInfoByUserId(String userId);
+    void removeUserInfo(String userId);
     boolean isUserActiveAnywhere(String userId);
     void addActiveSession(String userId, String sessionId);
     void removeActiveSession(String userId, String sessionId);
