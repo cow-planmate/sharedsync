@@ -95,7 +95,9 @@ public class EntityAllArgsConstructorGenerator {
                 for (int i = 0; i < cacheInfo.getEntityFields().size(); i++) {
                     FieldInfo f = cacheInfo.getEntityFields().get(i);
                     String t;
-                    if (f.isOneToMany() || f.isManyToMany()) {
+                    if (f.isIgnored()) {
+                        t = Generator.denormalizeType(f.getType(), f.getOriginalType());
+                    } else if (f.isOneToMany() || f.isManyToMany()) {
                         // use List<FullType> for collection relations
                         t = "java.util.List<" + f.getType() + ">";
                     } else {

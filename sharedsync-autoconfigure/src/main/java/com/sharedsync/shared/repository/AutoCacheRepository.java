@@ -7,6 +7,7 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.ListIterator;
@@ -23,6 +24,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import com.sharedsync.shared.annotation.Cache;
 import com.sharedsync.shared.annotation.CacheId;
 import com.sharedsync.shared.annotation.EntityConverter;
+import com.sharedsync.shared.annotation.IgnoreShared;
 import com.sharedsync.shared.annotation.ParentId;
 import com.sharedsync.shared.annotation.TableName;
 import com.sharedsync.shared.dto.CacheDto;
@@ -60,7 +62,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     private final Field entityIdField;
     private final Class<ID> idClass;
     private final String redisTemplateBeanName;
-
+    private final List<Field> ignoredEntityFields;
 
     private final List<Field> dtoFields;
 
@@ -130,6 +132,16 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         @SuppressWarnings("unchecked")
         Class<ID> detectedIdClass = (Class<ID>) detectedEntityIdField.getType();
         this.idClass = detectedIdClass;
+
+        // @IgnoreShared 필드 미리 캐싱 (동기화 시 보존용)
+        List<Field> ignored = new ArrayList<>();
+        for (Field f : getEntityClass().getDeclaredFields()) {
+            if (f.isAnnotationPresent(IgnoreShared.class)) {
+                f.setAccessible(true);
+                ignored.add(f);
+            }
+        }
+        this.ignoredEntityFields = Collections.unmodifiableList(ignored);
 
         this.dtoFields = Arrays.stream(dtoClass.getDeclaredFields())
                 .filter(field -> !Modifier.isStatic(field.getModifiers()))
@@ -462,6 +474,20 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                     // 관계 필드도 null이 아니면 업데이트
                     Object sourceValue = field.get(source);
                     if (sourceValue != null) {
+                        // Collection 타입인 경우 (OneToMany, ManyToMany) 기존 컬렉션을 유지하며 내용만 업데이트
+                        if (sourceValue instanceof Collection<?> sourceCollection) {
+                            Object targetValue = field.get(target);
+                            if (targetValue instanceof Collection targetCollection && targetCollection != sourceCollection) {
+                                try {
+                                    targetCollection.clear();
+                                    ((Collection) targetCollection).addAll(sourceCollection);
+                                } catch (Exception e) {
+                                    // 읽기 전용 컬렉션이거나 수정 불가한 경우 교체 시도
+                                    field.set(target, sourceValue);
+                                }
+                                continue;
+                            }
+                        }
                         field.set(target, sourceValue);
                     }
                     continue;
@@ -1754,6 +1780,20 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         } else {
             // 기존 엔티티 - merge
             try {
+                // @IgnoreShared 필드가 있다면 DB의 기존 값을 유지하도록 병합 전 복사
+                if (!ignoredEntityFields.isEmpty()) {
+                    T existing = entityManager.find(getEntityClass(), id);
+                    if (existing != null) {
+                        for (Field f : ignoredEntityFields) {
+                            try {
+                                Object val = f.get(existing);
+                                f.set(entity, val);
+                            } catch (IllegalAccessException e) {
+                                // ignore
+                            }
+                        }
+                    }
+                }
                 return entityManager.merge(entity);
             } catch (jakarta.persistence.OptimisticLockException | org.hibernate.StaleObjectStateException e) {
                 // 이미 다른 트랜잭션에 의해 수정/삭제된 경우 무시

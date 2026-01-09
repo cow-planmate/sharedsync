@@ -119,7 +119,8 @@ public class DtoGenerator {
         List<FieldInfo> fields = cacheInfo.getEntityFields();
         boolean first = true;
         for (FieldInfo field : fields) {
-            if (field.isManyToOne()) {
+            if (field.isIgnored()) continue;
+            if (field.isManyToOne() || field.isOneToOne()) {
                 if (!first) {
                     sb.append(", ");
                 } else {
@@ -148,12 +149,24 @@ public class DtoGenerator {
 
         for (FieldInfo field : fields) {
 
+            if (field.isIgnored()) {
+                String dtoFieldType = Generator.denormalizeType(field.getType(), field.getOriginalType());
+                switch (dtoFieldType) {
+                    case "int", "long", "short", "byte" -> sb.append("                0,\n");
+                    case "float", "double" -> sb.append("                0.0,\n");
+                    case "boolean" -> sb.append("                false,\n");
+                    case "char" -> sb.append("                '\\u0000',\n");
+                    default -> sb.append("                null,\n");
+                }
+                continue;
+            }
+
             if (field.getName().equals(idName)) {
                 sb.append("                this.").append(field.getName()).append(",\n");
                 continue;
             }
 
-            if (field.isManyToOne() || field.isOneToMany() || field.isManyToMany()) {
+            if (field.isManyToOne() || field.isOneToOne() || field.isOneToMany() || field.isManyToMany()) {
                 // parameter passed into toEntity(...) for relations
                 sb.append("                ").append(field.getName()).append(",\n");
             } else {
@@ -179,17 +192,20 @@ public class DtoGenerator {
 
         // collect fields that need reflection helpers: ManyToOne (single id) and collection relations
         List<FieldInfo> collectionFields = fields.stream()
+            .filter(f -> !f.isIgnored())
             .filter(f -> f.isOneToMany() || f.isManyToMany())
             .toList();
 
         List<FieldInfo> manyToOneFields = fields.stream()
-            .filter(f -> f.isManyToOne())
+            .filter(f -> !f.isIgnored())
+            .filter(f -> f.isManyToOne() || f.isOneToOne())
             .filter(f -> cacheInfo.getRelatedEntities().stream().anyMatch(re -> isSameEntity(f, re)))
             .toList();
 
         // simple fields (no relation, not id) — generate reflection helpers so DTO generation works even without getters
         List<FieldInfo> simpleFields = fields.stream()
-            .filter(f -> !f.isOneToMany() && !f.isManyToMany() && !f.isManyToOne())
+            .filter(f -> !f.isIgnored())
+            .filter(f -> !f.isOneToMany() && !f.isManyToMany() && !f.isManyToOne() && !f.isOneToOne())
             .filter(f -> !f.getName().equals(cacheInfo.getIdName()))
             .toList();
 
@@ -480,14 +496,14 @@ public class DtoGenerator {
         params.append(cacheInfo.getIdType()).append(" ").append(cacheInfo.getIdName());
 
         for (FieldInfo fieldInfo : fields) {
-            if (fieldInfo.getName().equals(cacheInfo.getIdName())) continue;
+            if (fieldInfo.getName().equals(cacheInfo.getIdName()) || fieldInfo.isIgnored()) continue;
 
             RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
                     .filter(re -> isSameEntity(fieldInfo, re))
                     .findFirst()
                     .orElse(null);
 
-            if (matched != null && fieldInfo.isManyToOne()) {
+            if (matched != null && (fieldInfo.isManyToOne() || fieldInfo.isOneToOne())) {
                 String fkFieldName = matched.getCacheEntityIdName();
                 String fkFieldType = Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType());
                 params.append(", ").append(fkFieldType).append(" ").append(fkFieldName);
@@ -512,14 +528,14 @@ public class DtoGenerator {
         sb.append("        this.").append(cacheInfo.getIdName()).append(" = ").append(cacheInfo.getIdName()).append(";\n");
 
         for (FieldInfo fieldInfo : fields) {
-            if (fieldInfo.getName().equals(cacheInfo.getIdName())) continue;
+            if (fieldInfo.getName().equals(cacheInfo.getIdName()) || fieldInfo.isIgnored()) continue;
 
             RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
                     .filter(re -> isSameEntity(fieldInfo, re))
                     .findFirst()
                     .orElse(null);
 
-            if (matched != null && fieldInfo.isManyToOne()) {
+            if (matched != null && (fieldInfo.isManyToOne() || fieldInfo.isOneToOne())) {
                 String fkFieldName = matched.getCacheEntityIdName();
                 sb.append("        this.").append(fkFieldName).append(" = ").append(fkFieldName).append(";\n");
             }
@@ -569,15 +585,15 @@ public class DtoGenerator {
 
         for (FieldInfo fieldInfo : cacheInfo.getEntityFields()) {
 
-            if (fieldInfo.getName().equals(cacheInfo.getIdName())) continue;
+            if (fieldInfo.getName().equals(cacheInfo.getIdName()) || fieldInfo.isIgnored()) continue;
 
-            // ManyToOne
+            // ManyToOne / OneToOne
             RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
                     .filter(re -> isSameEntity(fieldInfo, re))
                     .findFirst()
                     .orElse(null);
 
-            if (matched != null && fieldInfo.isManyToOne()) {
+            if (matched != null && (fieldInfo.isManyToOne() || fieldInfo.isOneToOne())) {
                 String fkFieldName = matched.getCacheEntityIdName();
                 String fkFieldType = Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType());
 
@@ -649,15 +665,15 @@ public class DtoGenerator {
 
         for (FieldInfo field : cacheInfo.getEntityFields()) {
 
-            if (field.getName().equals(idName)) continue;
+            if (field.getName().equals(idName) || field.isIgnored()) continue;
 
             RelatedEntity match = cacheInfo.getRelatedEntities().stream()
                     .filter(re -> isSameEntity(field, re))
                     .findFirst().orElse(null);
 
             if (match != null) {
-                // ManyToOne -> use reflection helper to extract related id (handles missing getters)
-                if (field.isManyToOne()) {
+                // ManyToOne / OneToOne -> use reflection helper to extract related id (handles missing getters)
+                if (field.isManyToOne() || field.isOneToOne()) {
                     String fname = field.getName();
                     String up = fname.toUpperCase();
                     sb.append("                ");
@@ -703,7 +719,7 @@ public class DtoGenerator {
         boolean first = true;
         for (FieldInfo field : fields) {
             
-            if (field.isManyToOne()) {
+            if (field.isManyToOne() || field.isOneToOne()) {
                 if (!first) {
                 sb.append(", ");
                 } else {
@@ -733,7 +749,7 @@ public class DtoGenerator {
                 continue;
             }
 
-            if (field.isManyToOne() || field.isOneToMany() || field.isManyToMany()) {
+            if (field.isManyToOne() || field.isOneToOne() || field.isOneToMany() || field.isManyToMany()) {
                 // parameter passed into toEntity(...) for relations
                 sb.append("                ").append(field.getName()).append(",\n");
             } else {

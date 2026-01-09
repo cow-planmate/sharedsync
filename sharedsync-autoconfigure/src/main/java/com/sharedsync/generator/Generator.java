@@ -41,16 +41,20 @@ public class Generator extends AbstractProcessor {
         private boolean isManyToOne;
         private boolean isOneToMany;
         private boolean isManyToMany;
+        private boolean isOneToOne;
+        private boolean isIgnored;
         private String originalType;
         private String collectionPath;
 
-        public FieldInfo(String name, String type, boolean isManyToOne, boolean isOneToMany, boolean isManyToMany, String collectionPath) {
+        public FieldInfo(String name, String type, boolean isManyToOne, boolean isOneToMany, boolean isManyToMany, boolean isOneToOne, boolean isIgnored, String collectionPath) {
             this.name = name;
             this.originalType = type;
             this.type = normalizeType(type);
             this.isManyToOne = isManyToOne;
             this.isOneToMany = isOneToMany;
             this.isManyToMany = isManyToMany;
+            this.isOneToOne = isOneToOne;
+            this.isIgnored = isIgnored;
             this.collectionPath = collectionPath;
         }
     }
@@ -179,6 +183,8 @@ public class Generator extends AbstractProcessor {
                     boolean isManyToOne = field.getAnnotation(jakarta.persistence.ManyToOne.class) != null;
                     boolean isOneToMany = field.getAnnotation(jakarta.persistence.OneToMany.class) != null;
                     boolean isManyToMany = field.getAnnotation(jakarta.persistence.ManyToMany.class) != null;
+                    boolean isOneToOne = field.getAnnotation(jakarta.persistence.OneToOne.class) != null;
+                    boolean isIgnored = field.getAnnotation(com.sharedsync.shared.annotation.IgnoreShared.class) != null;
                     String type;
                     String collectionPath = "";
                     if (isOneToMany || isManyToMany) {
@@ -198,7 +204,7 @@ public class Generator extends AbstractProcessor {
                         type = field.asType().toString();
                     }
                     cacheInfo.addEntityField(
-                            new FieldInfo(field.getSimpleName().toString(), type, isManyToOne, isOneToMany, isManyToMany, collectionPath)
+                            new FieldInfo(field.getSimpleName().toString(), type, isManyToOne, isOneToMany, isManyToMany, isOneToOne, isIgnored, collectionPath)
                     );
                 }
 
@@ -212,9 +218,11 @@ public class Generator extends AbstractProcessor {
                 // ManyToOne 연관 엔티티 처리, OneToMany 연관 엔티티 처리, ManyToMany 연관 엔티티 처리
                 if (field.getAnnotation(jakarta.persistence.ManyToOne.class) != null ||
                         field.getAnnotation(jakarta.persistence.OneToMany.class) != null ||
-                        field.getAnnotation(jakarta.persistence.ManyToMany.class) != null) {
+                        field.getAnnotation(jakarta.persistence.ManyToMany.class) != null ||
+                        field.getAnnotation(jakarta.persistence.OneToOne.class) != null) {
                     RelatedEntity related = new RelatedEntity();
-                    if(field.getAnnotation(jakarta.persistence.ManyToOne.class) != null){
+                    if(field.getAnnotation(jakarta.persistence.ManyToOne.class) != null ||
+                            field.getAnnotation(jakarta.persistence.OneToOne.class) != null){
                         related.setEntityPath(field.asType().toString());
                     }
                     if(field.getAnnotation(jakarta.persistence.OneToMany.class) != null ||
@@ -243,7 +251,8 @@ public class Generator extends AbstractProcessor {
 
                     // Determine the correct declared type to inspect for @Id
                     DeclaredType targetDeclared = null;
-                    if (field.getAnnotation(jakarta.persistence.ManyToOne.class) != null) {
+                    if (field.getAnnotation(jakarta.persistence.ManyToOne.class) != null ||
+                            field.getAnnotation(jakarta.persistence.OneToOne.class) != null) {
                         if (field.asType() instanceof DeclaredType dt) {
                             targetDeclared = dt;
                         }
