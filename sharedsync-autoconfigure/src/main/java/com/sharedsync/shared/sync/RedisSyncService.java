@@ -41,9 +41,14 @@ public class RedisSyncService {
      * Redis로부터 수신한 메시지를 로컬 웹소켓 클라이언트들에게 전달합니다.
      */
     public void handleMessage(RedisSyncMessage message) {
-        log.debug("Received sync message from Redis: destination={}, payload={}", 
-                message.getDestination(), message.getPayload());
-        
-        messagingTemplate.convertAndSend(message.getDestination(), message.getPayload());
+        try {
+            log.info("Redis로부터 웹소켓 동기화 메시지 수신: destination={}, payloadType={}", 
+                    message.getDestination(), 
+                    message.getPayload() != null ? message.getPayload().getClass().getSimpleName() : "null");
+            
+            messagingTemplate.convertAndSend(message.getDestination(), message.getPayload());
+        } catch (Exception e) {
+            log.error("웹소켓 메시지 전달 중 오류 발생: {}", e.getMessage(), e);
+        }
     }
 }
