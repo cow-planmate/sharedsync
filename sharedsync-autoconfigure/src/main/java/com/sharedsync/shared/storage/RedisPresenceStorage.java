@@ -156,7 +156,7 @@ public class RedisPresenceStorage implements PresenceStorage {
                 activeUserIds.add(candidateUserIds.get(i));
             } else {
                 redis.opsForHash().delete(TRACKER + rootId, trackerKeys.get(i));
-                removedUserIds.add(candidateUserIds.get(i));
+                removedUserIds.add(trackerKeys.get(i)); // userId//sessionId 형태의 전체 키 추가
             }
         }
 

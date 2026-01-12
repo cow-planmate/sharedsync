@@ -90,22 +90,15 @@ public class PresenceSessionManager {
         java.util.Set<String> allRooms = presenceStorage.getAllRoomIds();
         for (String rootId : allRooms) {
             try {
-                List<String> removedUsers = presenceStorage.purgeZombies(rootId);
-                for (String userId : removedUsers) {
+                List<String> removedEntries = presenceStorage.purgeZombies(rootId);
+                for (String entry : removedEntries) {
+                    String[] parts = entry.split("//");
+                    if (parts.length < 2) continue;
+                    String userId = parts[0];
+                    String sessionId = parts[1];
                     log.info("ZOMBIE DETECTED: Removing user {} from room {}", userId, rootId);
                     
-                    // DB 동기화 여부 확인 (마지막 사람이 좀비였다면 데이터 밀어넣기)
-                    if (!presenceStorage.hasTracker(rootId)) {
-                        syncToDatabaseIfLocked(rootId);
-                    }
-
-                    // 다른 사용자들에게 퇴장 알림 방송
-                    broadcastUpdate(rootId, ACTION_DELETE, userId);
-                    
-                    // 다른 곳에서도 활동이 없으면 유저 정보 삭제
-                    if (!presenceStorage.isUserActiveAnywhere(userId)) {
-                        presenceStorage.removeUserInfo(userId);
-                    }
+                    performDisconnect(rootId, userId, sessionId);
                 }
             } catch (Exception e) {
                 log.warn("Failed to cleanup room {}: {}", rootId, e.getMessage());
@@ -143,9 +136,13 @@ public class PresenceSessionManager {
      * 연결 해제 시 (퇴장)
      */
     public void handleDisconnect(String userId, String sessionId) {
-        localSessions.remove(sessionId);
-        
         String rootId = presenceStorage.removeSessionRootMapping(sessionId);
+        performDisconnect(rootId, userId, sessionId);
+    }
+
+    private void performDisconnect(String rootId, String userId, String sessionId) {
+        localSessions.remove(sessionId);
+
         if (rootId == null || rootId.isBlank()) return;
 
         if (!authProperties.isEnabled()) {
