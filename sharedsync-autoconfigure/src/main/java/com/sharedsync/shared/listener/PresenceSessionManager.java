@@ -3,19 +3,24 @@ package com.sharedsync.shared.listener;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import com.sharedsync.shared.presence.core.PresenceBroadcaster;
 import com.sharedsync.shared.presence.core.PresenceRootResolver;
 import com.sharedsync.shared.presence.core.UserProvider;
 import com.sharedsync.shared.properties.SharedSyncAuthProperties;
+import com.sharedsync.shared.properties.SharedSyncPresenceProperties;
 import com.sharedsync.shared.storage.PresenceStorage;
 import com.sharedsync.shared.sync.CacheSyncService;
 
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PresenceSessionManager {
 
     private static final String DEFAULT_INDEX = "0";
@@ -29,6 +34,10 @@ public class PresenceSessionManager {
     private final CacheSyncService cacheSyncService;
     private final PresenceRootResolver presenceRootResolver;
     private final SharedSyncAuthProperties authProperties;
+    private final SharedSyncPresenceProperties presenceProperties;
+
+    // 현재 서버 인스턴스에서 관리 중인 세션 목록
+    private final java.util.Set<String> localSessions = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /**
      * 연결 시 (입장)
@@ -37,6 +46,8 @@ public class PresenceSessionManager {
         if (!authProperties.isEnabled()) {
             userId = "ws-" + sessionId;
         }
+
+        localSessions.add(sessionId);
 
         if (!presenceStorage.hasTracker(rootId)) {
             cacheInitializer.initializeHierarchy(rootId);
@@ -51,26 +62,89 @@ public class PresenceSessionManager {
         }
 
         presenceStorage.insertTracker(rootId, sessionId, userId, DEFAULT_INDEX);
-        presenceStorage.mapSessionToRoot(sessionId, rootId);
+        presenceStorage.mapSessionToRoot(sessionId, rootId, presenceProperties.getSessionTimeout());
         presenceStorage.addActiveSession(userId, sessionId);
 
+        broadcastUpdate(rootId, ACTION_CREATE, userId);
+    }
+
+
+    /**
+     * 하트비트 처리 (세션 만료 연장)
+     */
+    public void handleHeartbeat(String sessionId) {
+        presenceStorage.refreshSession(sessionId, presenceProperties.getSessionTimeout());
+    }
+
+    /**
+     * 주기적으로 모든 방의 좀비 데이터를 정리합니다.
+     * 클라이언트가 목록을 요청하지 않더라도 데이터 무결성을 유지하기 위함입니다.
+     */
+    @Scheduled(fixedDelayString = "${sharedsync.presence.cleanup-interval:30}000")
+    public void scheduleCleanup() {
+        if (!presenceProperties.isEnabled() || presenceProperties.getCleanupInterval() <= 0) {
+            return;
+        }
+
+        log.debug("Starting periodic presence zombie data cleanup...");
+        java.util.Set<String> allRooms = presenceStorage.getAllRoomIds();
+        for (String rootId : allRooms) {
+            try {
+                List<String> removedUsers = presenceStorage.purgeZombies(rootId);
+                for (String userId : removedUsers) {
+                    log.info("ZOMBIE DETECTED: Removing user {} from room {}", userId, rootId);
+                    
+                    // DB 동기화 여부 확인 (마지막 사람이 좀비였다면 데이터 밀어넣기)
+                    if (!presenceStorage.hasTracker(rootId)) {
+                        syncToDatabaseIfLocked(rootId);
+                    }
+
+                    // 다른 사용자들에게 퇴장 알림 방송
+                    broadcastUpdate(rootId, ACTION_DELETE, userId);
+                    
+                    // 다른 곳에서도 활동이 없으면 유저 정보 삭제
+                    if (!presenceStorage.isUserActiveAnywhere(userId)) {
+                        presenceStorage.removeUserInfo(userId);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to cleanup room {}: {}", rootId, e.getMessage());
+            }
+        }
+    }
+
+    private void syncToDatabaseIfLocked(String rootId) {
+        if (presenceStorage.acquireSyncLock(rootId)) {
+            try {
+                if (!presenceStorage.hasTracker(rootId)) {
+                    cacheSyncService.syncToDatabase(rootId);
+                }
+            } finally {
+                presenceStorage.releaseSyncLock(rootId);
+            }
+        }
+    }
+
+    private void broadcastUpdate(String rootId, String action, String userId) {
         String channel = presenceRootResolver.getChannel();
+        Map<String, Object> userInfo = presenceStorage.getUserInfoByUserId(userId);
 
         presenceBroadcaster.broadcast(
                 channel,
                 rootId,
-                ACTION_CREATE,
+                action,
                 userId,
                 userInfo,
                 buildUserList(rootId)
         );
     }
 
-
     /**
      * 연결 해제 시 (퇴장)
      */
     public void handleDisconnect(String userId, String sessionId) {
+        localSessions.remove(sessionId);
+        
         String rootId = presenceStorage.removeSessionRootMapping(sessionId);
         if (rootId == null || rootId.isBlank()) return;
 
@@ -95,29 +169,10 @@ public class PresenceSessionManager {
         presenceStorage.removeActiveSession(userId, sessionId);
 
         if (!presenceStorage.hasTracker(rootId)) {
-            if (presenceStorage.acquireSyncLock(rootId)) {
-                try {
-                    // 락 획득 후 다시 한번 확인 (그 사이에 누가 들어왔을 수 있음)
-                    if (!presenceStorage.hasTracker(rootId)) {
-                        cacheSyncService.syncToDatabase(rootId);
-                    }
-                } finally {
-                    presenceStorage.releaseSyncLock(rootId);
-                }
-            }
+            syncToDatabaseIfLocked(rootId);
         }
 
-        String channel = presenceRootResolver.getChannel();
-        Map<String, Object> userInfo = presenceStorage.getUserInfoByUserId(userId);
-
-        presenceBroadcaster.broadcast(
-                channel,
-                rootId,
-                ACTION_DELETE,
-                userId,
-                userInfo,
-                buildUserList(rootId)
-        );
+        broadcastUpdate(rootId, ACTION_DELETE, userId);
 
         // 다른 방이나 다른 세션에 여전히 남아있는지 확인 후 삭제
         if (!presenceStorage.isUserActiveAnywhere(userId)) {
@@ -136,6 +191,22 @@ public class PresenceSessionManager {
                     return userMap;
                 })
                 .toList();
+    }
+
+    /**
+     * 서버 종료 시 관리 중인 세션들을 정리하여 좀비 데이터 방지
+     */
+    @PreDestroy
+    public void cleanup() {
+        log.info("Cleaning up {} local presence sessions before shutdown...", localSessions.size());
+        for (String sessionId : localSessions) {
+            try {
+                handleDisconnect(null, sessionId);
+            } catch (Exception e) {
+                log.warn("Failed to cleanup session {} during shutdown: {}", sessionId, e.getMessage());
+            }
+        }
+        localSessions.clear();
     }
 
 }

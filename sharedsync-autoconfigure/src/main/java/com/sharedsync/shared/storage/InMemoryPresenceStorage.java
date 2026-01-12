@@ -103,8 +103,13 @@ public class InMemoryPresenceStorage implements PresenceStorage {
     }
 
     @Override
-    public void mapSessionToRoot(String sessionId, String rootId) {
+    public void mapSessionToRoot(String sessionId, String rootId, long timeoutSeconds) {
         sessionToRoot.put(sessionId, rootId);
+    }
+
+    @Override
+    public void refreshSession(String sessionId, long timeoutSeconds) {
+        // 인메모리에서는 별도 처리 하지 않음 (필요 시 세션 타임아웃 맵 관리)
     }
 
     @Override
@@ -129,6 +134,16 @@ public class InMemoryPresenceStorage implements PresenceStorage {
             userIds.add(userId);
         }
         return userIds;
+    }
+
+    @Override
+    public List<String> purgeZombies(String rootId) {
+        return new ArrayList<>(); // 메모리 방식은 TTL이 없으므로 좀비가 없음
+    }
+
+    @Override
+    public java.util.Set<String> getAllRoomIds() {
+        return trackers.keySet();
     }
 
     @Override

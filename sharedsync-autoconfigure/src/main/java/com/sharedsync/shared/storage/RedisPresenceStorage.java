@@ -93,8 +93,13 @@ public class RedisPresenceStorage implements PresenceStorage {
     }
 
     @Override
-    public void mapSessionToRoot(String sessionId, String rootId) {
-        redis.opsForValue().set(SESSION_TO_ROOT + sessionId, rootId);
+    public void mapSessionToRoot(String sessionId, String rootId, long timeoutSeconds) {
+        redis.opsForValue().set(SESSION_TO_ROOT + sessionId, rootId, java.time.Duration.ofSeconds(timeoutSeconds));
+    }
+
+    @Override
+    public void refreshSession(String sessionId, long timeoutSeconds) {
+        redis.expire(SESSION_TO_ROOT + sessionId, java.time.Duration.ofSeconds(timeoutSeconds));
     }
 
     @Override
@@ -111,15 +116,69 @@ public class RedisPresenceStorage implements PresenceStorage {
 
     @Override
     public List<String> getUserIdsInRoom(String rootId) {
-        Map<Object, Object> entries = redis.opsForHash().entries(TRACKER + rootId);
+        return cleanAndGetActiveUserIds(rootId).activeUserIds();
+    }
 
-        List<String> list = new ArrayList<>();
+    @Override
+    public List<String> purgeZombies(String rootId) {
+        return cleanAndGetActiveUserIds(rootId).removedUserIds();
+    }
+
+    private record CleanupResult(List<String> activeUserIds, List<String> removedUserIds) {}
+
+    private CleanupResult cleanAndGetActiveUserIds(String rootId) {
+        Map<Object, Object> entries = redis.opsForHash().entries(TRACKER + rootId);
+        if (entries.isEmpty()) {
+            redis.delete(TRACKER + rootId);
+            return new CleanupResult(new ArrayList<>(), new ArrayList<>());
+        }
+
+        List<String> trackerKeys = new ArrayList<>();
+        List<String> sessionRedisKeys = new ArrayList<>();
+        List<String> candidateUserIds = new ArrayList<>();
+
         for (Object k : entries.keySet()) {
             String key = k.toString();
-            String userId = key.split("//")[0]; // "userId//sessionId" → userId만 추출
-            list.add(userId);
+            String[] parts = key.split("//");
+            if (parts.length < 2) continue;
+
+            trackerKeys.add(key);
+            sessionRedisKeys.add(SESSION_TO_ROOT + parts[1]);
+            candidateUserIds.add(parts[0]);
         }
-        return list;
+
+        List<Object> sessionValues = redis.opsForValue().multiGet(sessionRedisKeys);
+        List<String> activeUserIds = new ArrayList<>();
+        List<String> removedUserIds = new ArrayList<>();
+
+        for (int i = 0; i < sessionRedisKeys.size(); i++) {
+            if (sessionValues != null && i < sessionValues.size() && sessionValues.get(i) != null) {
+                activeUserIds.add(candidateUserIds.get(i));
+            } else {
+                redis.opsForHash().delete(TRACKER + rootId, trackerKeys.get(i));
+                removedUserIds.add(candidateUserIds.get(i));
+            }
+        }
+
+        if (activeUserIds.isEmpty()) {
+            redis.delete(TRACKER + rootId);
+        }
+
+        return new CleanupResult(activeUserIds, removedUserIds);
+    }
+
+    @Override
+    public java.util.Set<String> getAllRoomIds() {
+        java.util.Set<String> roomIds = new java.util.HashSet<>();
+        // SCAN을 사용하여 성능 부하 최소화하며 Tracker 키 탐색
+        org.springframework.data.redis.core.Cursor<byte[]> cursor = redis.getConnectionFactory().getConnection()
+                .scan(org.springframework.data.redis.core.ScanOptions.scanOptions().match(TRACKER + "*").count(100).build());
+        
+        while (cursor.hasNext()) {
+            String key = new String(cursor.next());
+            roomIds.add(key.substring(TRACKER.length()));
+        }
+        return roomIds;
     }
 
     @Override
