@@ -1,7 +1,5 @@
 package com.sharedsync.shared.listener;
 
-import java.util.List;
-
 import org.springframework.context.event.EventListener;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.stereotype.Component;
@@ -34,7 +32,7 @@ public class SharedEventTracker {
         if (destination == null) return;
 
         
-        if (!destination.startsWith("/topic/" + channel)) {
+        if (destination.startsWith("/topic/" + channel)) {
             String sessionId = accessor.getSessionId();
             String userId = extractUserId(accessor);
             String roomId = parseRoomId(destination);
@@ -69,10 +67,11 @@ public class SharedEventTracker {
 
     private String parseRoomId(String destination) {
         if (destination == null) return null;
-        List<String> tokens = List.of(destination.split("/"));
-        if (tokens.size() <= 2) {
+        String[] tokens = destination.split("/");
+        if (tokens.length < 3) {
             return null;
         }
-        return tokens.get(2);
+        // 마지막 토큰을 ID로 간주 (/topic/entity/id 형태)
+        return tokens[tokens.length - 1];
     }
 }

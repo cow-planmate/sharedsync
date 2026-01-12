@@ -24,16 +24,26 @@ public class PresenceBroadcaster {
             Map<String, Object> userInfo,
             List<Map<String, Object>> users
     ) {
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("uid", uid);
-        payload.put("userInfo", userInfo);
-        payload.put("users", users); // 전체 리스트 추가
-        payload.put("action", action); // 액션 추가
+        Map<String, Object> payload = createPayload(uid, userInfo, users, action);
 
         redisSyncService.publish(
                 String.format("/topic/%s/%s", entityName, roomId),
                 payload
         );
+    }
+
+    public Map<String, Object> createPayload(
+            String uid,
+            Map<String, Object> userInfo,
+            List<Map<String, Object>> users,
+            String action
+    ) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("uid", uid);
+        payload.put("userInfo", userInfo);
+        payload.put("users", users);
+        payload.put("action", action);
+        return payload;
     }
 
 }

@@ -2,6 +2,8 @@ package com.sharedsync.shared.listener;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -65,7 +67,17 @@ public class PresenceSessionManager {
         presenceStorage.mapSessionToRoot(sessionId, rootId, presenceProperties.getSessionTimeout());
         presenceStorage.addActiveSession(userId, sessionId);
 
-        broadcastUpdate(rootId, ACTION_CREATE, userId);
+        // 브로드캐스트와 직접 전송을 약간 지연시켜 클라이언트의 구독 처리가 완전히 완료된 후 메시지를 받도록 합니다.
+        // 유저가 처음 접속했을 때, 구독 frame에 대한 처리가 브로커에서 완전히 끝나기 전에 메시지가 발송되면 유실될 수 있습니다.
+        final String finalUserId = userId;
+        CompletableFuture.delayedExecutor(1000, TimeUnit.MILLISECONDS).execute(() -> {
+            try {
+                // 구독 처리가 완료된 후 브로드캐스트를 보내면 본인을 포함한 모든 참여자가 상태를 수신합니다.
+                broadcastUpdate(rootId, ACTION_CREATE, finalUserId);
+            } catch (Exception e) {
+                log.warn("Failed to send initial presence message", e);
+            }
+        });
     }
 
 
@@ -205,5 +217,4 @@ public class PresenceSessionManager {
         }
         localSessions.clear();
     }
-
 }
