@@ -11,10 +11,10 @@ public class SharedSyncPresenceProperties {
     private boolean enabled = true; // 기본값 true
 
     /**
-     * 세션 만료 시간 (단위: 초). 기본값 60초.
+     * 세션 만료 시간 (단위: 초). 기본값 1시간.
      * 이 시간 동안 활동이 없으면 좀비 데이터로 간주되어 삭제될 수 있습니다.
      */
-    private long sessionTimeout = 60;
+    private long sessionTimeout = 60*60; // 기본값 1시간
 
     /**
      * 백그라운드 좀비 데이터 정리 주기 (단위: 초).
