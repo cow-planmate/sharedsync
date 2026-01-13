@@ -32,6 +32,26 @@ public class PresenceBroadcaster {
         );
     }
 
+    public void sendToSession(
+            String entityName,
+            String roomId,
+            String user,
+            String sessionId,
+            String action,
+            String uid,
+            Map<String, Object> userInfo,
+            List<Map<String, Object>> users
+    ) {
+        Map<String, Object> payload = createPayload(uid, userInfo, users, action);
+
+        redisSyncService.sendToSession(
+                user,
+                sessionId,
+                String.format("/topic/%s/%s", entityName, roomId),
+                payload
+        );
+    }
+
     public Map<String, Object> createPayload(
             String uid,
             Map<String, Object> userInfo,

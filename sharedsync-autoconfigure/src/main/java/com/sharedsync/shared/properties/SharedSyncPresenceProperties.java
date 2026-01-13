@@ -22,6 +22,12 @@ public class SharedSyncPresenceProperties {
      */
     private long cleanupInterval = 30;
 
+    /**
+     * 구독 후 최초 상태 브로드캐스트 지연 시간 (단위: 밀리초).
+     * 클라이언트의 구독 처리가 완전히 완료된 후 메시지를 받도록 지연시킵니다.
+     */
+    private long broadcastDelay = 1000;
+
     public boolean isEnabled() {
         return enabled;
     }
@@ -44,5 +50,13 @@ public class SharedSyncPresenceProperties {
 
     public void setCleanupInterval(long cleanupInterval) {
         this.cleanupInterval = cleanupInterval;
+    }
+
+    public long getBroadcastDelay() {
+        return broadcastDelay;
+    }
+
+    public void setBroadcastDelay(long broadcastDelay) {
+        this.broadcastDelay = broadcastDelay;
     }
 }

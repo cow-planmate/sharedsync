@@ -1,6 +1,8 @@
 package com.sharedsync.shared.sync;
 
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
+import org.springframework.messaging.simp.SimpMessageType;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
@@ -35,6 +37,23 @@ public class RedisSyncService {
                 .build();
 
         redisSyncTemplate.convertAndSend(props.getRedisSync().getChannel(), message);
+    }
+
+    /**
+     * 특정 세션에게만 메시지를 전송합니다 (지연 없이 즉시 전송용).
+     */
+    public void sendToSession(String user, String sessionId, String destination, Object payload) {
+        SimpMessageHeaderAccessor headerAccessor = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
+        headerAccessor.setSessionId(sessionId);
+        headerAccessor.setLeaveMutable(true);
+        
+        // 특정 유저의 특정 세션을 타겟으로 전송
+        messagingTemplate.convertAndSendToUser(
+                user, 
+                destination, 
+                payload, 
+                headerAccessor.getMessageHeaders()
+        );
     }
 
     /**

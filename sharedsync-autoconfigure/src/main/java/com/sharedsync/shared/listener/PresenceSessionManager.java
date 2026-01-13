@@ -66,14 +66,13 @@ public class PresenceSessionManager {
         presenceStorage.insertTracker(rootId, sessionId, userId, DEFAULT_INDEX);
         presenceStorage.mapSessionToRoot(sessionId, rootId, presenceProperties.getSessionTimeout());
         presenceStorage.addActiveSession(userId, sessionId);
-
-        // 브로드캐스트와 직접 전송을 약간 지연시켜 클라이언트의 구독 처리가 완전히 완료된 후 메시지를 받도록 합니다.
-        // 유저가 처음 접속했을 때, 구독 frame에 대한 처리가 브로커에서 완전히 끝나기 전에 메시지가 발송되면 유실될 수 있습니다.
         final String finalUserId = userId;
-        CompletableFuture.delayedExecutor(1000, TimeUnit.MILLISECONDS).execute(() -> {
+        broadcastUpdate(rootId, ACTION_CREATE, userId);
+
+
+        CompletableFuture.delayedExecutor(presenceProperties.getBroadcastDelay(), TimeUnit.MILLISECONDS).execute(() -> {
             try {
-                // 구독 처리가 완료된 후 브로드캐스트를 보내면 본인을 포함한 모든 참여자가 상태를 수신합니다.
-                broadcastUpdate(rootId, ACTION_CREATE, finalUserId);
+                sendToSession(rootId, sessionId, ACTION_CREATE, finalUserId);
             } catch (Exception e) {
                 log.warn("Failed to send initial presence message", e);
             }
@@ -137,6 +136,25 @@ public class PresenceSessionManager {
         presenceBroadcaster.broadcast(
                 channel,
                 rootId,
+                action,
+                userId,
+                userInfo,
+                buildUserList(rootId)
+        );
+    }
+
+    private void sendToSession(String rootId, String sessionId, String action, String userId) {
+        String channel = presenceRootResolver.getChannel();
+        Map<String, Object> userInfo = presenceStorage.getUserInfoByUserId(userId);
+
+        // 인증된 사용자라면 "u:ID", 아니라면 세션 ID 등을 타겟으로 합니다.
+        String principalName = authProperties.isEnabled() ? "u:" + userId : sessionId;
+
+        presenceBroadcaster.sendToSession(
+                channel,
+                rootId,
+                principalName,
+                sessionId,
                 action,
                 userId,
                 userInfo,
