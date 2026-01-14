@@ -45,6 +45,8 @@ public class PresenceSessionManager {
      * 연결 시 (입장)
      */
     public void handleSubscribe(String rootId, String userId, String sessionId) {
+        log.info("[PresenceManager] handleSubscribe: rootId={}, userId={}, sessionId={}", rootId, userId, sessionId);
+        
         if (!authProperties.isEnabled()) {
             userId = "ws-" + sessionId;
         }
@@ -52,11 +54,13 @@ public class PresenceSessionManager {
         localSessions.add(sessionId);
 
         if (!presenceStorage.hasTracker(rootId)) {
+            log.info("[PresenceManager] Initializing hierarchy for rootId={}", rootId);
             cacheInitializer.initializeHierarchy(rootId);
         }
 
         Map<String, Object> userInfo = presenceStorage.getUserInfoByUserId(userId);
         if (userInfo == null || userInfo.isEmpty()) {
+            log.debug("[PresenceManager] UserInfo not found in cache for userId={}, fetching from provider", userId);
             userInfo = userProvider.findUserInfoByUserId(userId);
             if (userInfo != null && !userInfo.isEmpty()) {
                 presenceStorage.saveUserInfo(userId, userInfo);
@@ -66,12 +70,15 @@ public class PresenceSessionManager {
         presenceStorage.insertTracker(rootId, sessionId, userId, DEFAULT_INDEX);
         presenceStorage.mapSessionToRoot(sessionId, rootId, presenceProperties.getSessionTimeout());
         presenceStorage.addActiveSession(userId, sessionId);
+        
         final String finalUserId = userId;
+        log.info("[PresenceManager] Broadcasting update (CREATE) for rootId={}, userId={}", rootId, userId);
         broadcastUpdate(rootId, ACTION_CREATE, userId);
 
 
         CompletableFuture.delayedExecutor(presenceProperties.getBroadcastDelay(), TimeUnit.MILLISECONDS).execute(() -> {
             try {
+                log.debug("[PresenceManager] Sending initial message to session: sessionId={}", sessionId);
                 sendToSession(rootId, sessionId, ACTION_CREATE, finalUserId);
             } catch (Exception e) {
                 log.warn("Failed to send initial presence message", e);

@@ -9,9 +9,11 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 @ConditionalOnProperty(name = "sharedsync.cache.type", havingValue = "redis")
 public class RedisPresenceStorage implements PresenceStorage {
 
@@ -152,6 +154,7 @@ public class RedisPresenceStorage implements PresenceStorage {
             sessionValues.add(redis.opsForValue().get(sessionKey));
         }
 
+        log.debug("[RedisStorage] Checking session activity for rootId={}, sessionCount={}", rootId, sessionRedisKeys.size());
         List<String> activeUserIds = new ArrayList<>();
         List<String> removedUserIds = new ArrayList<>();
 
@@ -159,12 +162,14 @@ public class RedisPresenceStorage implements PresenceStorage {
             if (sessionValues != null && i < sessionValues.size() && sessionValues.get(i) != null) {
                 activeUserIds.add(candidateUserIds.get(i));
             } else {
+                log.info("[RedisStorage] Session expired or invalid, cleaning up: {}", trackerKeys.get(i));
                 redis.opsForHash().delete(TRACKER + rootId, trackerKeys.get(i));
                 removedUserIds.add(trackerKeys.get(i)); // userId//sessionId 형태의 전체 키 추가
             }
         }
 
         if (activeUserIds.isEmpty()) {
+            log.info("[RedisStorage] No active users left in room {}, deleting tracker key", rootId);
             redis.delete(TRACKER + rootId);
         }
 
