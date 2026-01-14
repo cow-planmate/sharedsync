@@ -147,7 +147,11 @@ public class RedisPresenceStorage implements PresenceStorage {
             candidateUserIds.add(parts[0]);
         }
 
-        List<Object> sessionValues = redis.opsForValue().multiGet(sessionRedisKeys);
+        List<Object> sessionValues = new ArrayList<>();
+        for (String sessionKey : sessionRedisKeys) {
+            sessionValues.add(redis.opsForValue().get(sessionKey));
+        }
+
         List<String> activeUserIds = new ArrayList<>();
         List<String> removedUserIds = new ArrayList<>();
 
