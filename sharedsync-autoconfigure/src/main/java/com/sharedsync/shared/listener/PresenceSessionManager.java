@@ -72,7 +72,6 @@ public class PresenceSessionManager {
         presenceStorage.addActiveSession(userId, sessionId);
         
         final String finalUserId = userId;
-        log.info("[PresenceManager] Broadcasting update (CREATE) for rootId={}, userId={}", rootId, userId);
         broadcastUpdate(rootId, ACTION_CREATE, userId);
 
 
@@ -138,6 +137,7 @@ public class PresenceSessionManager {
 
     private void broadcastUpdate(String rootId, String action, String userId) {
         String channel = presenceRootResolver.getChannel();
+        log.debug("Broadcasting update on channel: {}", channel);
         Map<String, Object> userInfo = presenceStorage.getUserInfoByUserId(userId);
 
         presenceBroadcaster.broadcast(
