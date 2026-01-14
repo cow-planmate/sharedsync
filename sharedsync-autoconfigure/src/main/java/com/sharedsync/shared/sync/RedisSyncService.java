@@ -25,17 +25,18 @@ public class RedisSyncService {
      * 모든 서버 인스턴스가 이 메시지를 수신하여 각자의 웹소켓 클라이언트에게 전달합니다.
      */
     public void publish(String destination, Object payload) {
+        log.debug("1Broadcasting update on destination: {}", destination);
         if (!props.getRedisSync().isEnabled()) {
             // Redis 동기화가 비활성화된 경우 로컬로 즉시 전송
             messagingTemplate.convertAndSend(destination, payload);
             return;
         }
-
+        log.debug("2Broadcasting update on destination: {}", destination);
         RedisSyncMessage message = RedisSyncMessage.builder()
                 .destination(destination)
                 .payload(payload)
                 .build();
-
+        log.debug("3Broadcasting update on destination: {}", props.getRedisSync().getChannel());
         redisSyncTemplate.convertAndSend(props.getRedisSync().getChannel(), message);
     }
 

@@ -137,7 +137,7 @@ public class PresenceSessionManager {
 
     private void broadcastUpdate(String rootId, String action, String userId) {
         String channel = presenceRootResolver.getChannel();
-        log.debug("Broadcasting update on channel: {}", channel);
+        
         Map<String, Object> userInfo = presenceStorage.getUserInfoByUserId(userId);
 
         presenceBroadcaster.broadcast(
