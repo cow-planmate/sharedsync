@@ -19,6 +19,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisPassword;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
@@ -79,6 +80,7 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
     }
 
     @Bean
+    @Primary
     public RedisConnectionFactory redisConnectionFactory(
             @Value("${spring.data.redis.host:localhost}") String host,
             @Value("${spring.data.redis.replica-host:}") String replicaHost,
@@ -124,6 +126,41 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
             standaloneConfig.setPassword(RedisPassword.of(password));
         }
         
+        LettuceConnectionFactory factory = new LettuceConnectionFactory(standaloneConfig, clientConfig);
+        factory.afterPropertiesSet();
+        return factory;
+    }
+
+    /**
+     * Pub/Sub 전용 RedisConnectionFactory.
+     * Master/Replica 설정이 활성화된 경우에도 Pub/Sub은 Master와 직접 연결되어야 합니다.
+     * (Lettuce의 MasterReplica 설정은 Pub/Sub subscription을 지원하지 않음)
+     */
+    @Bean(name = "pubSubConnectionFactory")
+    public RedisConnectionFactory pubSubConnectionFactory(
+            @Value("${spring.data.redis.host:localhost}") String host,
+            @Value("${spring.data.redis.port:6379}") String portStr,
+            @Value("${spring.data.redis.password:}") String password
+    ) {
+        int port = 6379;
+        try {
+            if (portStr != null && !portStr.startsWith("tcp://")) {
+                port = Integer.parseInt(portStr);
+            }
+        } catch (NumberFormatException e) {
+            port = 6379;
+        }
+
+        // Pub/Sub은 항상 Standalone 구성을 사용하여 Master와 직접 통신하도록 합니다.
+        RedisStandaloneConfiguration standaloneConfig = new RedisStandaloneConfiguration(host, port);
+        if (password != null && !password.isEmpty()) {
+            standaloneConfig.setPassword(RedisPassword.of(password));
+        }
+
+        LettuceClientConfiguration clientConfig = LettuceClientConfiguration.builder()
+                .commandTimeout(Duration.ofSeconds(5))
+                .build();
+
         LettuceConnectionFactory factory = new LettuceConnectionFactory(standaloneConfig, clientConfig);
         factory.afterPropertiesSet();
         return factory;

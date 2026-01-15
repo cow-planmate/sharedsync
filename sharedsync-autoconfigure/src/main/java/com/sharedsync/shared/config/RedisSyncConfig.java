@@ -1,5 +1,7 @@
 package com.sharedsync.shared.config;
 
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -29,21 +31,24 @@ public class RedisSyncConfig {
 
     @Bean
     public RedisMessageListenerContainer redisMessageListenerContainer(
+            @Qualifier("pubSubConnectionFactory") ObjectProvider<RedisConnectionFactory> pubSubFactoryProvider,
             RedisConnectionFactory connectionFactory,
             MessageListenerAdapter listenerAdapter
     ) {
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();
-        container.setConnectionFactory(connectionFactory);
+        // Master/Replica 구성 시 Pub/Sub 지원 오류를 방지하기 위해 전용 팩토리 우선 사용
+        container.setConnectionFactory(pubSubFactoryProvider.getIfAvailable(() -> connectionFactory));
         container.addMessageListener(listenerAdapter, new ChannelTopic(props.getRedisSync().getChannel()));
         return container;
     }
 
     @Bean
     public RedisTemplate<String, RedisSyncMessage> redisSyncTemplate(
+            @Qualifier("pubSubConnectionFactory") ObjectProvider<RedisConnectionFactory> pubSubFactoryProvider,
             RedisConnectionFactory connectionFactory
     ) {
         RedisTemplate<String, RedisSyncMessage> template = new RedisTemplate<>();
-        template.setConnectionFactory(connectionFactory);
+        template.setConnectionFactory(pubSubFactoryProvider.getIfAvailable(() -> connectionFactory));
         template.setKeySerializer(new StringRedisSerializer());
         
         // Use a clean ObjectMapper (without DefaultTyping) to avoid metadata in JSON
