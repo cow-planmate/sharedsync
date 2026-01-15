@@ -21,8 +21,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisPassword;
-import org.springframework.data.redis.connection.RedisSentinelConfiguration;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
+import org.springframework.data.redis.connection.RedisStaticMasterReplicaConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -81,10 +81,9 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
     @Bean
     public RedisConnectionFactory redisConnectionFactory(
             @Value("${spring.data.redis.host:localhost}") String host,
+            @Value("${spring.data.redis.replica-host:}") String replicaHost,
             @Value("${spring.data.redis.port:6379}") String portStr,
-            @Value("${spring.data.redis.password:}") String password,
-            @Value("${spring.data.redis.sentinel.master:}") String sentinelMaster,
-            @Value("${spring.data.redis.sentinel.nodes:}") String sentinelNodes
+            @Value("${spring.data.redis.password:}") String password
     ) {
         LettuceClientConfiguration clientConfig = LettuceClientConfiguration.builder()
                 .readFrom(ReadFrom.REPLICA_PREFERRED)
@@ -95,32 +94,8 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
                 .commandTimeout(Duration.ofSeconds(5))
                 .build();
 
-        // Sentinel 구성이 있는 경우 우선 처리
-        if (sentinelMaster != null && !sentinelMaster.isEmpty() && sentinelNodes != null && !sentinelNodes.isEmpty()) {
-            RedisSentinelConfiguration sentinelConfig = new RedisSentinelConfiguration()
-                    .master(sentinelMaster);
-            
-            String[] nodes = sentinelNodes.split(",");
-            for (String node : nodes) {
-                String[] parts = node.split(":");
-                String sHost = parts[0];
-                int sPort = parts.length > 1 ? Integer.parseInt(parts[1]) : 26379;
-                sentinelConfig.sentinel(sHost, sPort);
-            }
-            
-            if (password != null && !password.isEmpty()) {
-                sentinelConfig.setPassword(RedisPassword.of(password));
-                sentinelConfig.setSentinelPassword(RedisPassword.of(password));
-            }
-            LettuceConnectionFactory factory = new LettuceConnectionFactory(sentinelConfig, clientConfig);
-            factory.afterPropertiesSet();
-            return factory;
-        }
-
-        // Standalone 구성 (기존 방식)
         int port = 6379;
         try {
-            // K8s 환경에서 REDIS_PORT가 "tcp://..." 값으로 들어오는 경우 대비
             if (portStr != null && !portStr.startsWith("tcp://")) {
                 port = Integer.parseInt(portStr);
             }
@@ -128,6 +103,22 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
             port = 6379;
         }
 
+        // Replica 설정이 있는 경우 Static Master/Replica 구성 사용 (읽기 분산)
+        if (replicaHost != null && !replicaHost.isEmpty()) {
+            RedisStaticMasterReplicaConfiguration staticConfig = 
+                    new RedisStaticMasterReplicaConfiguration(host, port);
+            staticConfig.addNode(replicaHost, port);
+            
+            if (password != null && !password.isEmpty()) {
+                staticConfig.setPassword(RedisPassword.of(password));
+            }
+            
+            LettuceConnectionFactory factory = new LettuceConnectionFactory(staticConfig, clientConfig);
+            factory.afterPropertiesSet();
+            return factory;
+        }
+
+        // Standalone 구성 (기존 방식)
         RedisStandaloneConfiguration standaloneConfig = new RedisStandaloneConfiguration(host, port);
         if (password != null && !password.isEmpty()) {
             standaloneConfig.setPassword(RedisPassword.of(password));
