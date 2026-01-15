@@ -1,5 +1,6 @@
 package com.sharedsync.shared.config;
 
+import java.time.Duration;
 import java.util.Set;
 
 import org.reflections.Reflections;
@@ -21,6 +22,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisPassword;
 import org.springframework.data.redis.connection.RedisSentinelConfiguration;
+import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
+import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
@@ -35,6 +38,9 @@ import com.sharedsync.shared.annotation.Cache;
 import com.sharedsync.shared.dto.CacheDto;
 import com.sharedsync.shared.repository.CacheStore;
 import com.sharedsync.shared.repository.RedisCacheStore;
+
+import io.lettuce.core.ClientOptions;
+import io.lettuce.core.ReadFrom;
 
 /**
  * Redis 캐시 설정.
@@ -80,6 +86,15 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
             @Value("${spring.data.redis.sentinel.master:}") String sentinelMaster,
             @Value("${spring.data.redis.sentinel.nodes:}") String sentinelNodes
     ) {
+        LettuceClientConfiguration clientConfig = LettuceClientConfiguration.builder()
+                .readFrom(ReadFrom.REPLICA_PREFERRED)
+                .clientOptions(ClientOptions.builder()
+                        .disconnectedBehavior(ClientOptions.DisconnectedBehavior.REJECT_COMMANDS)
+                        .autoReconnect(true)
+                        .build())
+                .commandTimeout(Duration.ofSeconds(5))
+                .build();
+
         // Sentinel 구성이 있는 경우 우선 처리
         if (sentinelMaster != null && !sentinelMaster.isEmpty() && sentinelNodes != null && !sentinelNodes.isEmpty()) {
             RedisSentinelConfiguration sentinelConfig = new RedisSentinelConfiguration()
@@ -97,7 +112,7 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
                 sentinelConfig.setPassword(RedisPassword.of(password));
                 sentinelConfig.setSentinelPassword(RedisPassword.of(password));
             }
-            LettuceConnectionFactory factory = new LettuceConnectionFactory(sentinelConfig);
+            LettuceConnectionFactory factory = new LettuceConnectionFactory(sentinelConfig, clientConfig);
             factory.afterPropertiesSet();
             return factory;
         }
@@ -113,10 +128,12 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
             port = 6379;
         }
 
-        LettuceConnectionFactory factory = new LettuceConnectionFactory(host, port);
+        RedisStandaloneConfiguration standaloneConfig = new RedisStandaloneConfiguration(host, port);
         if (password != null && !password.isEmpty()) {
-            factory.setPassword(password);
+            standaloneConfig.setPassword(RedisPassword.of(password));
         }
+        
+        LettuceConnectionFactory factory = new LettuceConnectionFactory(standaloneConfig, clientConfig);
         factory.afterPropertiesSet();
         return factory;
     }
