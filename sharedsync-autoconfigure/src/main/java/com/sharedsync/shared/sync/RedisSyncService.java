@@ -38,6 +38,7 @@ public class RedisSyncService {
                 .build();
         log.debug("3Broadcasting update on destination: {}", props.getRedisSync().getChannel());
         redisSyncTemplate.convertAndSend(props.getRedisSync().getChannel(), message);
+        log.debug("4Success: Published to Redis channel: {}", message.getDestination(), message.getPayload());
     }
 
     /**

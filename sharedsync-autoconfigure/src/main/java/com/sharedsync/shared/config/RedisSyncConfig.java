@@ -12,6 +12,8 @@ import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.sharedsync.shared.properties.SharedSyncWebSocketProperties;
 import com.sharedsync.shared.sync.RedisSyncMessage;
 import com.sharedsync.shared.sync.RedisSyncService;
@@ -45,8 +47,12 @@ public class RedisSyncConfig {
         template.setKeySerializer(new StringRedisSerializer());
         
         // Use a clean ObjectMapper (without DefaultTyping) to avoid metadata in JSON
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.registerModule(new JavaTimeModule());
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
         Jackson2JsonRedisSerializer<RedisSyncMessage> serializer = 
-                new Jackson2JsonRedisSerializer<>(new ObjectMapper(), RedisSyncMessage.class);
+                new Jackson2JsonRedisSerializer<>(mapper, RedisSyncMessage.class);
         template.setValueSerializer(serializer);
         return template;
     }
@@ -54,6 +60,9 @@ public class RedisSyncConfig {
     @Bean
     public MessageListenerAdapter listenerAdapter(RedisSyncService redisSyncService) {
         ObjectMapper cleanMapper = new ObjectMapper();
+        cleanMapper.registerModule(new JavaTimeModule());
+        cleanMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
         MessageListenerAdapter adapter = new MessageListenerAdapter(new Object() {
             @SuppressWarnings("unused")
             public void handleMessage(Object message) {

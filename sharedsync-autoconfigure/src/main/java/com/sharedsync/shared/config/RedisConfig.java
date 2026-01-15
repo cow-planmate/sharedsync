@@ -97,7 +97,9 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
                 sentinelConfig.setPassword(RedisPassword.of(password));
                 sentinelConfig.setSentinelPassword(RedisPassword.of(password));
             }
-            return new LettuceConnectionFactory(sentinelConfig);
+            LettuceConnectionFactory factory = new LettuceConnectionFactory(sentinelConfig);
+            factory.afterPropertiesSet();
+            return factory;
         }
 
         // Standalone 구성 (기존 방식)
@@ -115,6 +117,7 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
         if (password != null && !password.isEmpty()) {
             factory.setPassword(password);
         }
+        factory.afterPropertiesSet();
         return factory;
     }
 
