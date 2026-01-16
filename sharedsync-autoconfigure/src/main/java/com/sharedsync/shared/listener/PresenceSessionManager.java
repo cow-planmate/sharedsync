@@ -137,16 +137,18 @@ public class PresenceSessionManager {
 
     private void broadcastUpdate(String rootId, String action, String userId) {
         String channel = presenceRootResolver.getChannel();
-        
         Map<String, Object> userInfo = presenceStorage.getUserInfoByUserId(userId);
 
+        // 중복 userId 제거 후 리스트 생성
+        java.util.List<Map<String, Object>> userList = buildUserListWithoutDuplicates(rootId);
+
         presenceBroadcaster.broadcast(
-                channel,
-                rootId,
-                action,
-                userId,
-                userInfo,
-                buildUserList(rootId)
+            channel,
+            rootId,
+            action,
+            userId,
+            userInfo,
+            userList
         );
     }
 
@@ -157,15 +159,18 @@ public class PresenceSessionManager {
         // 인증된 사용자라면 "u:ID", 아니라면 세션 ID 등을 타겟으로 합니다.
         String principalName = authProperties.isEnabled() ? "u:" + userId : sessionId;
 
+        // 중복 userId 제거 후 리스트 생성
+        java.util.List<Map<String, Object>> userList = buildUserListWithoutDuplicates(rootId);
+
         presenceBroadcaster.sendToSession(
-                channel,
-                rootId,
-                principalName,
-                sessionId,
-                action,
-                userId,
-                userInfo,
-                buildUserList(rootId)
+            channel,
+            rootId,
+            principalName,
+            sessionId,
+            action,
+            userId,
+            userInfo,
+            userList
         );
     }
 
@@ -214,17 +219,18 @@ public class PresenceSessionManager {
         }
     }
 
-    private List<Map<String, Object>> buildUserList(String rootId) {
-        return presenceStorage.getUserIdsInRoom(rootId)
-                .stream()
-                .map(id -> {
-                    Map<String, Object> userInfo = presenceStorage.getUserInfoByUserId(id);
-                    Map<String, Object> userMap = new java.util.HashMap<>();
-                    userMap.put("uid", id);
-                    userMap.put("userInfo", userInfo != null ? userInfo : new java.util.HashMap<>());
-                    return userMap;
-                })
-                .toList();
+    // 중복 userId를 제거한 userList 생성
+    private List<Map<String, Object>> buildUserListWithoutDuplicates(String rootId) {
+        java.util.Set<String> uniqueUserIds = new java.util.LinkedHashSet<>(presenceStorage.getUserIdsInRoom(rootId));
+        java.util.List<Map<String, Object>> result = new java.util.ArrayList<>();
+        for (String id : uniqueUserIds) {
+            Map<String, Object> userInfo = presenceStorage.getUserInfoByUserId(id);
+            Map<String, Object> userMap = new java.util.HashMap<>();
+            userMap.put("uid", id);
+            userMap.put("userInfo", userInfo != null ? userInfo : new java.util.HashMap<>());
+            result.add(userMap);
+        }
+        return result;
     }
 
     /**
