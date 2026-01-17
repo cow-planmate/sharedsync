@@ -1,5 +1,7 @@
 package com.sharedsync.shared.config;
 
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,6 +14,8 @@ import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.sharedsync.shared.properties.SharedSyncWebSocketProperties;
 import com.sharedsync.shared.sync.RedisSyncMessage;
 import com.sharedsync.shared.sync.RedisSyncService;
@@ -27,26 +31,33 @@ public class RedisSyncConfig {
 
     @Bean
     public RedisMessageListenerContainer redisMessageListenerContainer(
+            @Qualifier("pubSubConnectionFactory") ObjectProvider<RedisConnectionFactory> pubSubFactoryProvider,
             RedisConnectionFactory connectionFactory,
             MessageListenerAdapter listenerAdapter
     ) {
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();
-        container.setConnectionFactory(connectionFactory);
+        // Master/Replica 구성 시 Pub/Sub 지원 오류를 방지하기 위해 전용 팩토리 우선 사용
+        container.setConnectionFactory(pubSubFactoryProvider.getIfAvailable(() -> connectionFactory));
         container.addMessageListener(listenerAdapter, new ChannelTopic(props.getRedisSync().getChannel()));
         return container;
     }
 
     @Bean
     public RedisTemplate<String, RedisSyncMessage> redisSyncTemplate(
+            @Qualifier("pubSubConnectionFactory") ObjectProvider<RedisConnectionFactory> pubSubFactoryProvider,
             RedisConnectionFactory connectionFactory
     ) {
         RedisTemplate<String, RedisSyncMessage> template = new RedisTemplate<>();
-        template.setConnectionFactory(connectionFactory);
+        template.setConnectionFactory(pubSubFactoryProvider.getIfAvailable(() -> connectionFactory));
         template.setKeySerializer(new StringRedisSerializer());
         
         // Use a clean ObjectMapper (without DefaultTyping) to avoid metadata in JSON
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.registerModule(new JavaTimeModule());
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
         Jackson2JsonRedisSerializer<RedisSyncMessage> serializer = 
-                new Jackson2JsonRedisSerializer<>(new ObjectMapper(), RedisSyncMessage.class);
+                new Jackson2JsonRedisSerializer<>(mapper, RedisSyncMessage.class);
         template.setValueSerializer(serializer);
         return template;
     }
@@ -54,6 +65,9 @@ public class RedisSyncConfig {
     @Bean
     public MessageListenerAdapter listenerAdapter(RedisSyncService redisSyncService) {
         ObjectMapper cleanMapper = new ObjectMapper();
+        cleanMapper.registerModule(new JavaTimeModule());
+        cleanMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
         MessageListenerAdapter adapter = new MessageListenerAdapter(new Object() {
             @SuppressWarnings("unused")
             public void handleMessage(Object message) {

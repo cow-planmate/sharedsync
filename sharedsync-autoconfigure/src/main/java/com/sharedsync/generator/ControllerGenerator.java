@@ -35,7 +35,8 @@ public class ControllerGenerator {
 		source.append("import org.springframework.stereotype.Controller;\n");
 		source.append("import com.fasterxml.jackson.databind.ObjectMapper;\n");
 		source.append("import com.sharedsync.shared.dto.WResponse;\n");
-		source.append("import com.sharedsync.shared.dto.WRequest;\n\n");
+		source.append("import com.sharedsync.shared.dto.WRequest;\n");
+		source.append("import com.sharedsync.shared.sync.RedisSyncService;\n\n");
 
 		for (CacheInformation info : cacheInfoList) {
 			source.append("import ").append(info.getRequestPath()).append(".").append(info.getRequestClassName())
@@ -51,6 +52,7 @@ public class ControllerGenerator {
 		source.append("public class SharedSyncController {\n\n");
 
 		source.append("    private final ObjectMapper objectMapper;\n");
+		source.append("    private final RedisSyncService redisSyncService;\n");
 		for (CacheInformation info : cacheInfoList) {
 			String serviceVar = decapitalizeFirst(info.getServiceClassName());
 			source.append("    private final ").append(info.getServiceClassName()).append(" ").append(serviceVar)
@@ -58,12 +60,13 @@ public class ControllerGenerator {
 		}
 		source.append("\n");
 
-		source.append("    public SharedSyncController(ObjectMapper objectMapper");
+		source.append("    public SharedSyncController(ObjectMapper objectMapper, RedisSyncService redisSyncService");
 		for (CacheInformation info : cacheInfoList) {
 			source.append(", ").append(info.getServiceClassName()).append(" ").append(decapitalizeFirst(info.getServiceClassName()));
 		}
 		source.append(") {\n");
 		source.append("        this.objectMapper = objectMapper;\n");
+		source.append("        this.redisSyncService = redisSyncService;\n");
 		for (CacheInformation info : cacheInfoList) {
 			String serviceVar = decapitalizeFirst(info.getServiceClassName());
 			source.append("        this.").append(serviceVar).append(" = ").append(serviceVar).append(";\n");
@@ -71,11 +74,10 @@ public class ControllerGenerator {
 		source.append("    }\n\n");
 
 		source.append("    @MessageMapping(\"/{roomId}\")\n");
-		source.append("    @SendTo(\"/topic/{roomId}\")\n");
-		source.append("    public Object handle(@DestinationVariable(\"roomId\") int roomId, \n");
+		source.append("    public void handle(@DestinationVariable(\"roomId\") int roomId, \n");
 		source.append("                         @Payload java.util.Map<String, Object> payload) {\n\n");
 		source.append("        String entity = (String) payload.get(\"entity\");\n");
-		source.append("        if (entity == null) return null;\n\n");
+		source.append("        if (entity == null) return;\n\n");
 
 		source.append("        Object result = null;\n");
 		source.append("        switch (entity.toLowerCase()) {\n");
@@ -91,7 +93,9 @@ public class ControllerGenerator {
 		source.append("            default:\n");
 		source.append("                break;\n");
 		source.append("        }\n");
-		source.append("        return result;\n");
+		source.append("        if (result != null) {\n");
+		source.append("            redisSyncService.publish(\"/topic/\" + roomId, result);\n");
+		source.append("        }\n");
 		source.append("    }\n\n");
 
 		source.append("    private <Req extends WRequest, Res extends WResponse> Res handleAction(com.sharedsync.shared.service.SharedService<Req, Res> service, Req request) {\n");

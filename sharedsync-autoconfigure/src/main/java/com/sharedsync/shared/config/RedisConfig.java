@@ -1,5 +1,6 @@
 package com.sharedsync.shared.config;
 
+import java.time.Duration;
 import java.util.Set;
 
 import org.reflections.Reflections;
@@ -18,9 +19,12 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisPassword;
-import org.springframework.data.redis.connection.RedisSentinelConfiguration;
+import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
+import org.springframework.data.redis.connection.RedisStaticMasterReplicaConfiguration;
+import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
@@ -35,6 +39,9 @@ import com.sharedsync.shared.annotation.Cache;
 import com.sharedsync.shared.dto.CacheDto;
 import com.sharedsync.shared.repository.CacheStore;
 import com.sharedsync.shared.repository.RedisCacheStore;
+
+import io.lettuce.core.ClientOptions;
+import io.lettuce.core.ReadFrom;
 
 /**
  * Redis 캐시 설정.
@@ -73,37 +80,24 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
     }
 
     @Bean
+    @Primary
     public RedisConnectionFactory redisConnectionFactory(
             @Value("${spring.data.redis.host:localhost}") String host,
+            @Value("${spring.data.redis.replica-host:}") String replicaHost,
             @Value("${spring.data.redis.port:6379}") String portStr,
-            @Value("${spring.data.redis.password:}") String password,
-            @Value("${spring.data.redis.sentinel.master:}") String sentinelMaster,
-            @Value("${spring.data.redis.sentinel.nodes:}") String sentinelNodes
+            @Value("${spring.data.redis.password:}") String password
     ) {
-        // Sentinel 구성이 있는 경우 우선 처리
-        if (sentinelMaster != null && !sentinelMaster.isEmpty() && sentinelNodes != null && !sentinelNodes.isEmpty()) {
-            RedisSentinelConfiguration sentinelConfig = new RedisSentinelConfiguration()
-                    .master(sentinelMaster);
-            
-            String[] nodes = sentinelNodes.split(",");
-            for (String node : nodes) {
-                String[] parts = node.split(":");
-                String sHost = parts[0];
-                int sPort = parts.length > 1 ? Integer.parseInt(parts[1]) : 26379;
-                sentinelConfig.sentinel(sHost, sPort);
-            }
-            
-            if (password != null && !password.isEmpty()) {
-                sentinelConfig.setPassword(RedisPassword.of(password));
-                sentinelConfig.setSentinelPassword(RedisPassword.of(password));
-            }
-            return new LettuceConnectionFactory(sentinelConfig);
-        }
+        LettuceClientConfiguration clientConfig = LettuceClientConfiguration.builder()
+                .readFrom(ReadFrom.REPLICA_PREFERRED)
+                .clientOptions(ClientOptions.builder()
+                        .disconnectedBehavior(ClientOptions.DisconnectedBehavior.REJECT_COMMANDS)
+                        .autoReconnect(true)
+                        .build())
+                .commandTimeout(Duration.ofSeconds(5))
+                .build();
 
-        // Standalone 구성 (기존 방식)
         int port = 6379;
         try {
-            // K8s 환경에서 REDIS_PORT가 "tcp://..." 값으로 들어오는 경우 대비
             if (portStr != null && !portStr.startsWith("tcp://")) {
                 port = Integer.parseInt(portStr);
             }
@@ -111,10 +105,64 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
             port = 6379;
         }
 
-        LettuceConnectionFactory factory = new LettuceConnectionFactory(host, port);
-        if (password != null && !password.isEmpty()) {
-            factory.setPassword(password);
+        // Replica 설정이 있는 경우 Static Master/Replica 구성 사용 (읽기 분산)
+        if (replicaHost != null && !replicaHost.isEmpty()) {
+            RedisStaticMasterReplicaConfiguration staticConfig = 
+                    new RedisStaticMasterReplicaConfiguration(host, port);
+            staticConfig.addNode(replicaHost, port);
+            
+            if (password != null && !password.isEmpty()) {
+                staticConfig.setPassword(RedisPassword.of(password));
+            }
+            
+            LettuceConnectionFactory factory = new LettuceConnectionFactory(staticConfig, clientConfig);
+            factory.afterPropertiesSet();
+            return factory;
         }
+
+        // Standalone 구성 (기존 방식)
+        RedisStandaloneConfiguration standaloneConfig = new RedisStandaloneConfiguration(host, port);
+        if (password != null && !password.isEmpty()) {
+            standaloneConfig.setPassword(RedisPassword.of(password));
+        }
+        
+        LettuceConnectionFactory factory = new LettuceConnectionFactory(standaloneConfig, clientConfig);
+        factory.afterPropertiesSet();
+        return factory;
+    }
+
+    /**
+     * Pub/Sub 전용 RedisConnectionFactory.
+     * Master/Replica 설정이 활성화된 경우에도 Pub/Sub은 Master와 직접 연결되어야 합니다.
+     * (Lettuce의 MasterReplica 설정은 Pub/Sub subscription을 지원하지 않음)
+     */
+    @Bean(name = "pubSubConnectionFactory")
+    public RedisConnectionFactory pubSubConnectionFactory(
+            @Value("${spring.data.redis.host:localhost}") String host,
+            @Value("${spring.data.redis.port:6379}") String portStr,
+            @Value("${spring.data.redis.password:}") String password
+    ) {
+        int port = 6379;
+        try {
+            if (portStr != null && !portStr.startsWith("tcp://")) {
+                port = Integer.parseInt(portStr);
+            }
+        } catch (NumberFormatException e) {
+            port = 6379;
+        }
+
+        // Pub/Sub은 항상 Standalone 구성을 사용하여 Master와 직접 통신하도록 합니다.
+        RedisStandaloneConfiguration standaloneConfig = new RedisStandaloneConfiguration(host, port);
+        if (password != null && !password.isEmpty()) {
+            standaloneConfig.setPassword(RedisPassword.of(password));
+        }
+
+        LettuceClientConfiguration clientConfig = LettuceClientConfiguration.builder()
+                .commandTimeout(Duration.ofSeconds(5))
+                .build();
+
+        LettuceConnectionFactory factory = new LettuceConnectionFactory(standaloneConfig, clientConfig);
+        factory.afterPropertiesSet();
         return factory;
     }
 

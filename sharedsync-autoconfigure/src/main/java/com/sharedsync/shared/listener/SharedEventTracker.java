@@ -1,7 +1,5 @@
 package com.sharedsync.shared.listener;
 
-import java.util.List;
-
 import org.springframework.context.event.EventListener;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.stereotype.Component;
@@ -12,9 +10,11 @@ import com.sharedsync.shared.presence.core.PresenceRootResolver;
 import com.sharedsync.shared.properties.SharedSyncPresenceProperties;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class SharedEventTracker {
 
     private static final String USER_ID = "userId";
@@ -33,26 +33,30 @@ public class SharedEventTracker {
         String destination = accessor.getDestination();
         if (destination == null) return;
 
-        
-        if (!destination.startsWith("/topic/" + channel)) {
+        log.debug("[Presence] Subscribe event detected. destination={}, expected_channel={}", destination, channel);
+        if (destination.startsWith("/topic/" + channel)) {
             String sessionId = accessor.getSessionId();
             String userId = extractUserId(accessor);
             String roomId = parseRoomId(destination);
 
+            log.info("[Presence] Valid subscription: roomId={}, userId={}, sessionId={}", roomId, userId, sessionId);
+
             if (userId != null && roomId != null) {
                 presenceSessionManager.handleSubscribe(roomId, userId, sessionId);
+            } else {
+                log.warn("[Presence] Missing metadata: userId={}, roomId={}", userId, roomId);
             }
         }
     }
 
     @EventListener
     public void handleDisconnectEvent(SessionDisconnectEvent event) {
-
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
         String userId = extractUserId(accessor);
         String sessionId = accessor.getSessionId();
-        presenceSessionManager.handleDisconnect(userId, sessionId);
         
+        log.info("[Presence] Disconnect event: userId={}, sessionId={}", userId, sessionId);
+        presenceSessionManager.handleDisconnect(userId, sessionId);
     }
 
     private String extractUserId(StompHeaderAccessor accessor) {
@@ -69,10 +73,11 @@ public class SharedEventTracker {
 
     private String parseRoomId(String destination) {
         if (destination == null) return null;
-        List<String> tokens = List.of(destination.split("/"));
-        if (tokens.size() <= 2) {
+        String[] tokens = destination.split("/");
+        if (tokens.length < 3) {
             return null;
         }
-        return tokens.get(2);
+        // 마지막 토큰을 ID로 간주 (/topic/entity/id 형태)
+        return tokens[tokens.length - 1];
     }
 }
