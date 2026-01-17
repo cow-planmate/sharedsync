@@ -7,6 +7,7 @@ import org.reflections.Reflections;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.FactoryBean;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
@@ -19,7 +20,6 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisPassword;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
@@ -72,20 +72,19 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
     }
 
     @Bean
-    public RedisTemplate<String, Integer> refreshRedisTemplate(RedisConnectionFactory connectionFactory) {
+    public RedisTemplate<String, Integer> refreshRedisTemplate(@Qualifier("sharedSyncRedisConnectionFactory") RedisConnectionFactory connectionFactory) {
         RedisTemplate<String, Integer> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
         template.afterPropertiesSet();
         return template;
     }
 
-    @Bean
-    @Primary
-    public RedisConnectionFactory redisConnectionFactory(
-            @Value("${spring.data.redis.host:localhost}") String host,
-            @Value("${spring.data.redis.replica-host:}") String replicaHost,
-            @Value("${spring.data.redis.port:6379}") String portStr,
-            @Value("${spring.data.redis.password:}") String password
+    @Bean(name = "sharedSyncRedisConnectionFactory")
+    public RedisConnectionFactory sharedSyncRedisConnectionFactory(
+            @Value("${sharedsync.redis.host:${spring.data.redis.host:localhost}}") String host,
+            @Value("${sharedsync.redis.replica-host:${spring.data.redis.replica-host:}}") String replicaHost,
+            @Value("${sharedsync.redis.port:${spring.data.redis.port:6379}}") String portStr,
+            @Value("${sharedsync.redis.password:${spring.data.redis.password:}}") String password
     ) {
         LettuceClientConfiguration clientConfig = LettuceClientConfiguration.builder()
                 .readFrom(ReadFrom.REPLICA_PREFERRED)
@@ -180,7 +179,7 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
     }
 
     @Bean(name = "presenceRedis")
-    public RedisTemplate<String, Object> presenceRedis(RedisConnectionFactory connectionFactory) {
+    public RedisTemplate<String, Object> presenceRedis(@Qualifier("sharedSyncRedisConnectionFactory") RedisConnectionFactory connectionFactory) {
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
         configureSerializers(template);
@@ -194,7 +193,7 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
      */
     @Bean(name = "globalCacheStore")
     @SuppressWarnings("rawtypes")
-    public CacheStore redisCacheStore(RedisConnectionFactory connectionFactory, GenericJackson2JsonRedisSerializer serializer) {
+    public CacheStore redisCacheStore(@Qualifier("sharedSyncRedisConnectionFactory") RedisConnectionFactory connectionFactory, GenericJackson2JsonRedisSerializer serializer) {
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
         configureSerializers(template, serializer);
@@ -274,7 +273,7 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
         }
 
         @Autowired
-        public void setConnectionFactory(RedisConnectionFactory connectionFactory) {
+        public void setConnectionFactory(@Qualifier("sharedSyncRedisConnectionFactory") RedisConnectionFactory connectionFactory) {
             this.connectionFactory = connectionFactory;
         }
 
