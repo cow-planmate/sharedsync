@@ -66,6 +66,10 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     private final List<Field> dtoFields;
 
+    public Class<DTO> getDtoClass() {
+        return dtoClass;
+    }
+
     @SuppressWarnings("unchecked")
     public AutoCacheRepository() {
         // 제네릭 타입에서 DTO 클래스 추출

@@ -9,9 +9,13 @@ import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.annotation.Autowired;
+
 import com.sharedsync.shared.dto.CacheDto;
 import com.sharedsync.shared.dto.WRequest;
 import com.sharedsync.shared.dto.WResponse;
+import com.sharedsync.shared.history.HistoryAction;
+import com.sharedsync.shared.history.HistoryService;
 import com.sharedsync.shared.repository.AutoCacheRepository;
 
 /**
@@ -22,7 +26,11 @@ import com.sharedsync.shared.repository.AutoCacheRepository;
 public abstract class AbstractSharedCacheService<Req extends WRequest, Res extends WResponse, DTO extends CacheDto<ID>, ID>
         implements SharedService<Req, Res> {
 
+    @Autowired
+    protected HistoryService historyService;
+
     private final AutoCacheRepository<?, ID, DTO> cacheRepository;
+    private final String entityName;
     private final Function<Req, List<DTO>> requestExtractor;
     private final BiConsumer<Res, List<DTO>> responseWriter;
     private final Supplier<Res> responseFactory;
@@ -32,6 +40,7 @@ public abstract class AbstractSharedCacheService<Req extends WRequest, Res exten
 
     protected AbstractSharedCacheService(
             AutoCacheRepository<?, ID, DTO> cacheRepository,
+            String entityName,
             Function<Req, List<DTO>> requestExtractor,
             BiConsumer<Res, List<DTO>> responseWriter,
             Supplier<Res> responseFactory,
@@ -39,6 +48,7 @@ public abstract class AbstractSharedCacheService<Req extends WRequest, Res exten
             UnaryOperator<DTO> createTransformer,
             UnaryOperator<DTO> updateTransformer) {
         this.cacheRepository = cacheRepository;
+        this.entityName = entityName;
         this.requestExtractor = requestExtractor;
         this.responseWriter = responseWriter;
         this.responseFactory = responseFactory;
@@ -50,6 +60,22 @@ public abstract class AbstractSharedCacheService<Req extends WRequest, Res exten
     @Override
     public Res read(Req request) {
         throw new UnsupportedOperationException("Read operation is not implemented for AbstractSharedCacheService. Override in subclasses if needed.");
+    }
+
+    @Override
+    public Object undo(String rootId) {
+        if (historyService != null) {
+            return historyService.undo(rootId);
+        }
+        return null;
+    }
+
+    @Override
+    public Object redo(String rootId) {
+        if (historyService != null) {
+            return historyService.redo(rootId);
+        }
+        return null;
     }
 
     @Override
@@ -67,6 +93,9 @@ public abstract class AbstractSharedCacheService<Req extends WRequest, Res exten
                 .collect(Collectors.toList());
 
         List<DTO> saved = cacheRepository.saveAll(prepared);
+
+        recordHistory(request, HistoryAction.Type.CREATE, null, saved);
+
         responseWriter.accept(response, saved);
         return response;
     }
@@ -81,10 +110,17 @@ public abstract class AbstractSharedCacheService<Req extends WRequest, Res exten
             return response;
         }
 
+        List<DTO> before = payload.stream()
+                .map(idExtractor)
+                .map(cacheRepository::findDtoById)
+                .collect(Collectors.toList());
+
         List<DTO> updated = payload.stream()
                 .map(updateTransformer)
                 .map(cacheRepository::update)
                 .collect(Collectors.toList());
+
+        recordHistory(request, HistoryAction.Type.UPDATE, before, updated);
 
         responseWriter.accept(response, updated);
         return response;
@@ -100,6 +136,11 @@ public abstract class AbstractSharedCacheService<Req extends WRequest, Res exten
             return response;
         }
 
+        List<DTO> before = payload.stream()
+                .map(idExtractor)
+                .map(cacheRepository::findDtoById)
+                .collect(Collectors.toList());
+
         List<ID> ids = payload.stream()
                 .map(idExtractor)
                 .filter(Objects::nonNull)
@@ -109,8 +150,25 @@ public abstract class AbstractSharedCacheService<Req extends WRequest, Res exten
             cacheRepository.deleteAllById(ids);
         }
 
+        recordHistory(request, HistoryAction.Type.DELETE, before, null);
+
         responseWriter.accept(response, payload);
         return response;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void recordHistory(Req request, HistoryAction.Type type, List<DTO> before, List<DTO> after) {
+        if (HistoryService.isSkipHistory() || historyService == null || request.getRootId() == null) return;
+
+        historyService.record(request.getRootId(), HistoryAction.builder()
+                .type(type)
+                .entityName(entityName)
+                .dtoClassName(cacheRepository.getDtoClass().getName())
+                .beforeData((List<? extends CacheDto<?>>) (List<?>) before)
+                .afterData((List<? extends CacheDto<?>>) (List<?>) after)
+                .eventId(request.getEventId())
+                .timestamp(System.currentTimeMillis())
+                .build());
     }
 
     private List<DTO> safePayload(Req request) {

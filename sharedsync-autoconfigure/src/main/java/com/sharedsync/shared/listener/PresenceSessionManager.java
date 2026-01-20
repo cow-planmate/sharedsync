@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import com.sharedsync.shared.history.HistoryService;
 import com.sharedsync.shared.presence.core.PresenceBroadcaster;
 import com.sharedsync.shared.presence.core.PresenceRootResolver;
 import com.sharedsync.shared.presence.core.UserProvider;
@@ -34,6 +35,7 @@ public class PresenceSessionManager {
     private final UserProvider userProvider;        
     private final CacheInitializer cacheInitializer;
     private final CacheSyncService cacheSyncService;
+    private final HistoryService historyService;
     private final PresenceRootResolver presenceRootResolver;
     private final SharedSyncAuthProperties authProperties;
     private final SharedSyncPresenceProperties presenceProperties;
@@ -206,6 +208,7 @@ public class PresenceSessionManager {
 
         presenceStorage.removeTracker(rootId, sessionId, userId);
         presenceStorage.removeActiveSession(userId, sessionId);
+        historyService.clearHistory(rootId, sessionId);
 
         if (!presenceStorage.hasTracker(rootId)) {
             syncToDatabaseIfLocked(rootId);

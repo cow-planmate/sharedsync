@@ -179,10 +179,12 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
     }
 
     @Bean(name = "presenceRedis")
-    public RedisTemplate<String, Object> presenceRedis(@Qualifier("sharedSyncRedisConnectionFactory") RedisConnectionFactory connectionFactory) {
+    public RedisTemplate<String, Object> presenceRedis(
+            @Qualifier("sharedSyncRedisConnectionFactory") RedisConnectionFactory connectionFactory,
+            GenericJackson2JsonRedisSerializer serializer) {
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
-        configureSerializers(template);
+        configureSerializers(template, serializer);
         template.afterPropertiesSet();
         return template;
     }
