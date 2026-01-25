@@ -28,6 +28,7 @@ import com.sharedsync.shared.annotation.IgnoreShared;
 import com.sharedsync.shared.annotation.ParentId;
 import com.sharedsync.shared.annotation.TableName;
 import com.sharedsync.shared.dto.CacheDto;
+import com.sharedsync.shared.history.HistoryAction;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -1471,6 +1472,68 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
         propagateParentDeletion(id);
         getCacheStore().hashDelete(hashKey, String.valueOf(id));
+    }
+
+    /**
+     * 특정 엔티티 ID를 삭제할 때 함께 삭제될 모든 자식 엔티티들의 히스토리를 수집합니다.
+     */
+    @SuppressWarnings("unchecked")
+    public List<HistoryAction> collectCascadedHistory(ID id) {
+        if (id == null) {
+            return Collections.emptyList();
+        }
+
+        List<HistoryAction> cascadedActions = new ArrayList<>();
+        Map<String, AutoCacheRepository<?, ?, ?>> repositories =
+                (Map<String, AutoCacheRepository<?, ?, ?>>) (Map<?, ?>) applicationContext.getBeansOfType(AutoCacheRepository.class);
+        Class<T> entityClass = getEntityClass();
+
+        for (AutoCacheRepository<?, ?, ?> repository : repositories.values()) {
+            if (repository == this) {
+                continue;
+            }
+            if (repository.parentEntityClassMap.isEmpty()) {
+                continue;
+            }
+            for (Class<?> parentClass : repository.parentEntityClassMap.values()) {
+                if (parentClass.isAssignableFrom(entityClass)) {
+                    List<?> childDtos = repository.findDtosByParentIdUnchecked(id, parentClass);
+                    if (!childDtos.isEmpty()) {
+                        HistoryAction childAction = HistoryAction.builder()
+                                .type(HistoryAction.Type.DELETE)
+                                .entityName(repository.cacheKeyPrefix)
+                                .dtoClassName(repository.dtoClass.getName())
+                                .beforeData((List<? extends CacheDto<?>>) childDtos)
+                                .afterData(null)
+                                .subActions(new ArrayList<>())
+                                .build();
+                        
+                        // 각 자식 DTO에 대해 재귀적으로 수집
+                        for (Object childDto : childDtos) {
+                            Object childId = repository.extractIdFromDtoUnchecked(childDto);
+                            childAction.getSubActions().addAll(repository.collectCascadedHistoryUnchecked(childId));
+                        }
+                        cascadedActions.add(childAction);
+                    }
+                }
+            }
+        }
+        return cascadedActions;
+    }
+
+    @SuppressWarnings("unchecked")
+    public ID extractIdFromDtoUnchecked(Object dto) {
+        return extractId((DTO) dto);
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<HistoryAction> collectCascadedHistoryUnchecked(Object id) {
+        return collectCascadedHistory((ID) id);
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<DTO> findDtosByParentIdUnchecked(Object parentId, Class<?> parentClass) {
+        return findDtosByParentId((ID) parentId, parentClass);
     }
 
     @SuppressWarnings("unchecked")

@@ -145,6 +145,12 @@ public class HistoryService {
         response.put(payloadKey, data);
 
         redisSyncService.publish("/topic/" + rootId, response);
+
+        if (action.getSubActions() != null) {
+            for (HistoryAction subAction : action.getSubActions()) {
+                publishChange(rootId, subAction, isUndo);
+            }
+        }
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -152,6 +158,7 @@ public class HistoryService {
         AutoCacheRepository repo = findRepository(action.getDtoClassName());
         if (repo == null) return false;
 
+        boolean success = false;
         switch (action.getType()) {
             case CREATE:
                 // Undo CREATE: Delete if current state matches afterData
@@ -159,23 +166,32 @@ public class HistoryService {
                     if (!isSameState(repo.findDtoById(dto.getId()), dto)) return false;
                 }
                 repo.deleteAllById(extractIds(action.getAfterData()));
-                return true;
+                success = true;
+                break;
             case UPDATE:
                 // Undo UPDATE: Restore beforeData if current state matches afterData
                 for (CacheDto<?> dto : (List<CacheDto<?>>) action.getAfterData()) {
                     if (!isSameState(repo.findDtoById(dto.getId()), dto)) return false;
                 }
                 repo.saveAll(action.getBeforeData());
-                return true;
+                success = true;
+                break;
             case DELETE:
                 // Undo DELETE: Restore beforeData if current state is null
                 for (CacheDto<?> dto : (List<CacheDto<?>>) action.getBeforeData()) {
                     if (repo.findDtoById(dto.getId()) != null) return false;
                 }
                 repo.saveAll(action.getBeforeData());
-                return true;
+                success = true;
+                break;
         }
-        return false;
+
+        if (success && action.getSubActions() != null) {
+            for (HistoryAction subAction : action.getSubActions()) {
+                applyInverse(subAction);
+            }
+        }
+        return success;
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -183,6 +199,7 @@ public class HistoryService {
         AutoCacheRepository repo = findRepository(action.getDtoClassName());
         if (repo == null) return false;
 
+        boolean success = false;
         switch (action.getType()) {
             case CREATE:
                 // Redo CREATE: Save if current state is null
@@ -190,23 +207,32 @@ public class HistoryService {
                     if (repo.findDtoById(dto.getId()) != null) return false;
                 }
                 repo.saveAll(action.getAfterData());
-                return true;
+                success = true;
+                break;
             case UPDATE:
                 // Redo UPDATE: Restore afterData if current state matches beforeData
                 for (CacheDto<?> dto : (List<CacheDto<?>>) action.getBeforeData()) {
                     if (!isSameState(repo.findDtoById(dto.getId()), dto)) return false;
                 }
                 repo.saveAll(action.getAfterData());
-                return true;
+                success = true;
+                break;
             case DELETE:
                 // Redo DELETE: Delete if current state matches beforeData
                 for (CacheDto<?> dto : (List<CacheDto<?>>) action.getBeforeData()) {
                     if (!isSameState(repo.findDtoById(dto.getId()), dto)) return false;
                 }
                 repo.deleteAllById(extractIds(action.getBeforeData()));
-                return true;
+                success = true;
+                break;
         }
-        return false;
+
+        if (success && action.getSubActions() != null) {
+            for (HistoryAction subAction : action.getSubActions()) {
+                applyAction(subAction);
+            }
+        }
+        return success;
     }
 
     private boolean isSameState(Object current, Object expected) {

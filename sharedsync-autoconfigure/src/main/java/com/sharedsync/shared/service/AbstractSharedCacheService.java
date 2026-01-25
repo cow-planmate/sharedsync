@@ -1,5 +1,6 @@
 package com.sharedsync.shared.service;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -146,18 +147,29 @@ public abstract class AbstractSharedCacheService<Req extends WRequest, Res exten
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
+        List<HistoryAction> subActions = new ArrayList<>();
+        if (!HistoryService.isSkipHistory()) {
+            for (ID id : ids) {
+                subActions.addAll(cacheRepository.collectCascadedHistory(id));
+            }
+        }
+
         if (!ids.isEmpty()) {
             cacheRepository.deleteAllById(ids);
         }
 
-        recordHistory(request, HistoryAction.Type.DELETE, before, null);
+        recordHistory(request, HistoryAction.Type.DELETE, before, null, subActions);
 
         responseWriter.accept(response, payload);
         return response;
     }
 
-    @SuppressWarnings("unchecked")
     private void recordHistory(Req request, HistoryAction.Type type, List<DTO> before, List<DTO> after) {
+        recordHistory(request, type, before, after, null);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void recordHistory(Req request, HistoryAction.Type type, List<DTO> before, List<DTO> after, List<HistoryAction> subActions) {
         if (HistoryService.isSkipHistory() || historyService == null || request.getRootId() == null) return;
 
         historyService.record(request.getRootId(), HistoryAction.builder()
@@ -166,6 +178,7 @@ public abstract class AbstractSharedCacheService<Req extends WRequest, Res exten
                 .dtoClassName(cacheRepository.getDtoClass().getName())
                 .beforeData((List<? extends CacheDto<?>>) (List<?>) before)
                 .afterData((List<? extends CacheDto<?>>) (List<?>) after)
+                .subActions(subActions)
                 .eventId(request.getEventId())
                 .timestamp(System.currentTimeMillis())
                 .build());

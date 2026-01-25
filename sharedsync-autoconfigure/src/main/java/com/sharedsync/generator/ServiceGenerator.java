@@ -172,11 +172,18 @@ public class ServiceGenerator {
 		source.append("            .map(").append(cacheBean).append("::findDtoById)\n");
 		source.append("            .collect(java.util.stream.Collectors.toList());\n\n");
 
+		source.append("        java.util.List<com.sharedsync.shared.history.HistoryAction> subActions = new java.util.ArrayList<>();\n");
+		source.append("        if (!com.sharedsync.shared.history.HistoryService.isSkipHistory()) {\n");
+		source.append("            for (").append(idType).append(" id : ids) {\n");
+		source.append("                subActions.addAll(").append(cacheBean).append(".collectCascadedHistory(id));\n");
+		source.append("            }\n");
+		source.append("        }\n\n");
+
 		source.append("        if (!ids.isEmpty()) {\n");
 		source.append("            ").append(cacheBean).append(".deleteAllById(ids);\n");
 		source.append("        }\n");
 
-		source.append("        recordHistory(request, HistoryAction.Type.DELETE, before, null);\n");
+		source.append("        recordHistory(request, com.sharedsync.shared.history.HistoryAction.Type.DELETE, before, null, subActions);\n");
 		source.append("        response.set").append(cacheInfo.getDtoClassName()).append("s(payload);\n");
 		source.append("        return response;\n");
 		source.append("    }\n\n");
@@ -191,15 +198,20 @@ public class ServiceGenerator {
 		source.append("        return historyService.redo(rootId);\n");
 		source.append("    }\n\n");
 
+		source.append("    private void recordHistory(").append(cacheInfo.getRequestClassName()).append(" request, com.sharedsync.shared.history.HistoryAction.Type type, java.util.List<").append(cacheInfo.getDtoClassName()).append("> before, java.util.List<").append(cacheInfo.getDtoClassName()).append("> after) {\n");
+		source.append("        recordHistory(request, type, before, after, null);\n");
+		source.append("    }\n\n");
+
 		source.append("    @SuppressWarnings(\"unchecked\")\n");
-		source.append("    private void recordHistory(").append(cacheInfo.getRequestClassName()).append(" request, HistoryAction.Type type, java.util.List<").append(cacheInfo.getDtoClassName()).append("> before, java.util.List<").append(cacheInfo.getDtoClassName()).append("> after) {\n");
-		source.append("        if (HistoryService.isSkipHistory() || historyService == null || request.getRootId() == null) return;\n");
-		source.append("        historyService.record(request.getRootId(), HistoryAction.builder()\n");
+		source.append("    private void recordHistory(").append(cacheInfo.getRequestClassName()).append(" request, com.sharedsync.shared.history.HistoryAction.Type type, java.util.List<").append(cacheInfo.getDtoClassName()).append("> before, java.util.List<").append(cacheInfo.getDtoClassName()).append("> after, java.util.List<com.sharedsync.shared.history.HistoryAction> subActions) {\n");
+		source.append("        if (com.sharedsync.shared.history.HistoryService.isSkipHistory() || historyService == null || request.getRootId() == null) return;\n");
+		source.append("        historyService.record(request.getRootId(), com.sharedsync.shared.history.HistoryAction.builder()\n");
 		source.append("                .type(type)\n");
 		source.append("                .entityName(\"").append(cacheInfo.getEntityName().toLowerCase()).append("\")\n");
 		source.append("                .dtoClassName(").append(cacheInfo.getDtoClassName()).append(".class.getName())\n");
 		source.append("                .beforeData((java.util.List<? extends com.sharedsync.shared.dto.CacheDto<?>>) (java.util.List<?>) before)\n");
 		source.append("                .afterData((java.util.List<? extends com.sharedsync.shared.dto.CacheDto<?>>) (java.util.List<?>) after)\n");
+		source.append("                .subActions(subActions)\n");
 		source.append("                .eventId(request.getEventId())\n");
 		source.append("                .timestamp(System.currentTimeMillis())\n");
 		source.append("                .build());\n");

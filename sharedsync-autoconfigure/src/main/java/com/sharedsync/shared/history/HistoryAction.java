@@ -23,6 +23,7 @@ public class HistoryAction {
     private String dtoClassName;
     private List<? extends CacheDto<?>> beforeData;
     private List<? extends CacheDto<?>> afterData;
+    private List<HistoryAction> subActions; // 자식 엔티티들에 대한 히스토리
     private String eventId;
     private long timestamp;
 }
