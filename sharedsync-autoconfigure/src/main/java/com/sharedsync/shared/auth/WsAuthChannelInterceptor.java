@@ -3,7 +3,6 @@ package com.sharedsync.shared.auth;
 import java.security.Principal;
 import java.util.List;
 
-import com.sharedsync.shared.properties.SharedSyncAuthProperties;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
@@ -12,6 +11,7 @@ import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Component;
 
+import com.sharedsync.shared.properties.SharedSyncAuthProperties;
 
 import lombok.RequiredArgsConstructor;
 
@@ -32,7 +32,8 @@ public class WsAuthChannelInterceptor implements ChannelInterceptor {
         }
 
         StompHeaderAccessor acc = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
-        if (acc == null) return message;
+        if (acc == null)
+            return message;
 
         switch (acc.getCommand()) {
             case CONNECT -> handleConnect(acc);
@@ -54,7 +55,7 @@ public class WsAuthChannelInterceptor implements ChannelInterceptor {
             throw new AccessDeniedException("Invalid token");
         }
 
-        int userId = Integer.parseInt(tokenResolver.extractPrincipalId(token));
+        String userId = tokenResolver.extractPrincipalId(token);
         acc.setUser(new StompPrincipal(userId));
     }
 
@@ -68,12 +69,14 @@ public class WsAuthChannelInterceptor implements ChannelInterceptor {
 
     private void handleValidate(StompHeaderAccessor acc) {
         String dest = acc.getDestination();
-        if (dest == null) return;
+        if (dest == null)
+            return;
 
         Principal p = acc.getUser();
-        if (p == null) throw new AccessDeniedException("Unauthenticated");
+        if (p == null)
+            throw new AccessDeniedException("Unauthenticated");
 
-        Integer userId = ((StompPrincipal) p).userId();
+        String userId = ((StompPrincipal) p).userId();
 
         for (StompAccessValidator validator : accessValidators) {
             if (validator.supports(dest)) {
@@ -88,11 +91,10 @@ public class WsAuthChannelInterceptor implements ChannelInterceptor {
         return (values == null || values.isEmpty()) ? null : values.get(0);
     }
 
-    private record StompPrincipal(Integer userId) implements Principal {
-        @Override public String getName() { return "u:" + userId; }
+    private record StompPrincipal(String userId) implements Principal {
+        @Override
+        public String getName() {
+            return "u:" + userId;
+        }
     }
 }
-
-
-
-

@@ -34,23 +34,21 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
-import jakarta.persistence.criteria.Path;
-import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
 
 /**
  * 완전 자동화된 캐시 리포지토리
  * DTO에 어노테이션만 추가하면 모든 CRUD 및 DB 동기화 기능이 자동으로 구현됩니다.
  *
- * @param <T> 엔티티 타입
- * @param <ID> ID 타입  
+ * @param <T>   엔티티 타입
+ * @param <ID>  ID 타입
  * @param <DTO> DTO 타입
  */
 public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> implements CacheRepository<T, ID, DTO> {
 
     @Autowired
     private ApplicationContext applicationContext;
-    
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -110,7 +108,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
         this.parentIdFields = new ArrayList<>();
         this.parentEntityClassMap = new java.util.HashMap<>();
-        
+
         for (Field field : dtoClass.getDeclaredFields()) {
             if (field.isAnnotationPresent(ParentId.class)) {
                 field.setAccessible(true);
@@ -153,7 +151,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 .peek(field -> field.setAccessible(true))
                 .collect(Collectors.collectingAndThen(Collectors.toList(), Collections::unmodifiableList));
     }
-    
+
     // ==== CacheRepository 인터페이스 기본 CRUD 구현 ====
 
     @Override
@@ -167,8 +165,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     @Override
     public T getReferenceById(ID id) {
-        return findById(id).orElseThrow(() ->
-                new IllegalStateException("캐시에서 데이터를 찾을 수 없습니다: " + id));
+        return findById(id).orElseThrow(() -> new IllegalStateException("캐시에서 데이터를 찾을 수 없습니다: " + id));
     }
 
     @Override
@@ -189,7 +186,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         List<String> fields = new ArrayList<>();
         ids.forEach(id -> fields.add(String.valueOf(id)));
 
-        if (fields.isEmpty()) return Collections.emptyList();
+        if (fields.isEmpty())
+            return Collections.emptyList();
 
         List<DTO> dtos = getCacheStore().hashMutiGet(getRedisKey(null), fields);
         if (dtos == null) {
@@ -211,24 +209,21 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             id = changeType(id);
 
             if (id == null) {
-                if(idClass.getSimpleName().equals("String")){
-                    String temporaryId = java.util.UUID.randomUUID().toString();
-                    dto = updateDtoWithId(dto, (ID) temporaryId);
-                    iterator.set(dto); // 리스트 내부 DTO도 갱신
-                    id = extractId(dto);
+                Object temporaryId = null;
+                if (idClass.getSimpleName().equals("Integer")) {
+                    temporaryId = generateTemporaryId();
+                } else if (idClass.getSimpleName().equals("Long")) {
+                    temporaryId = Long.valueOf(generateTemporaryId());
+                } else if (idClass.getSimpleName().equals("String")) {
+                    temporaryId = String.valueOf(generateTemporaryId());
+                } else if (idClass.getSimpleName().equals("UUID")) {
+                    temporaryId = java.util.UUID.randomUUID();
                 }
-                else if(idClass.getSimpleName().equals("Long")){
-                    Long temporaryId = Long.valueOf(generateTemporaryId());
-                    dto = updateDtoWithId(dto, (ID) temporaryId);
-                    iterator.set(dto); // 리스트 내부 DTO도 갱신
-                    id = extractId(dto);
-                }
-                else if(idClass.getSimpleName().equals("Integer")){
-                    Integer temporaryId = generateTemporaryId();
-                    dto = updateDtoWithId(dto, (ID) temporaryId);
-                    iterator.set(dto); // 리스트 내부 DTO도 갱신
-                    id = extractId(dto);
 
+                if (temporaryId != null) {
+                    dto = updateDtoWithId(dto, (ID) temporaryId);
+                    iterator.set(dto);
+                    id = extractId(dto);
                 }
             }
             String hashKey = getRedisKey(id);
@@ -268,10 +263,11 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     private void addIdToParentIndex(String hashKey, Class<?> parentClass, Object parentId, ID id) {
-        if (parentId == null || parentClass == null) return;
+        if (parentId == null || parentClass == null)
+            return;
         String field = getParentIndexField(parentClass, parentId);
         String idStr = String.valueOf(id);
-        
+
         synchronized (this) {
             String existing = getCacheStore().hashGetString(hashKey, field);
             if (existing == null || existing.isEmpty()) {
@@ -286,10 +282,11 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     private void removeIdFromParentIndex(String hashKey, Class<?> parentClass, Object parentId, ID id) {
-        if (parentId == null || parentClass == null) return;
+        if (parentId == null || parentClass == null)
+            return;
         String field = getParentIndexField(parentClass, parentId);
         String idStr = String.valueOf(id);
-        
+
         synchronized (this) {
             String existing = getCacheStore().hashGetString(hashKey, field);
             if (existing != null && !existing.isEmpty()) {
@@ -315,20 +312,21 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         if (applicationContext.containsBean(cacheStoreBeanName)) {
             return (CacheStore<DTO>) applicationContext.getBean(cacheStoreBeanName);
         }
-        
+
         // 글로벌 CacheStore가 있으면 사용 (InMemory 또는 커스텀)
         if (applicationContext.containsBean("globalCacheStore")) {
             return (CacheStore<DTO>) applicationContext.getBean("globalCacheStore");
         }
-        
+
         // 폴백 CacheStore 확인 (Redis 없을 때 자동 생성된 InMemory)
         if (applicationContext.containsBean("fallbackCacheStore")) {
             return (CacheStore<DTO>) applicationContext.getBean("fallbackCacheStore");
         }
-        
+
         // Redis 사용 - RedisTemplate을 래핑하여 반환 (하위 호환)
         try {
-            return new RedisCacheStore<>((RedisTemplate<String, DTO>) applicationContext.getBean(redisTemplateBeanName));
+            return new RedisCacheStore<>(
+                    (RedisTemplate<String, DTO>) applicationContext.getBean(redisTemplateBeanName));
         } catch (Exception e) {
             // RedisTemplate도 없으면 임시 InMemory 사용 (개발 편의)
             return (CacheStore<DTO>) new InMemoryCacheStore<DTO>();
@@ -347,19 +345,21 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     @SuppressWarnings("unchecked")
     protected final ID extractId(DTO dto) {
         try {
-            return changeType((ID)idField.get(dto));
+            return changeType((ID) idField.get(dto));
         } catch (IllegalAccessException e) {
             throw new RuntimeException("ID 필드에 접근할 수 없습니다: " + idField.getName(), e);
         }
     }
 
     protected final List<Object> extractParentIds(DTO dto) {
-        if (parentIdFields.isEmpty()) return Collections.emptyList();
+        if (parentIdFields.isEmpty())
+            return Collections.emptyList();
         List<Object> ids = new ArrayList<>();
         for (Field field : parentIdFields) {
             try {
                 Object val = field.get(dto);
-                if (val != null) ids.add(val);
+                if (val != null)
+                    ids.add(val);
             } catch (IllegalAccessException e) {
                 // ignore
             }
@@ -374,16 +374,26 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     public DTO save(DTO dto) {
         ID id = extractId(dto);
 
-        // ID가 null이면 임시 음수 ID 생성
+        // ID가 null이면 임시 ID 생성
         if (id == null) {
-            Integer temporaryId = generateTemporaryId();
+            Object temporaryId = null;
+            if (idClass.getSimpleName().equals("UUID")) {
+                temporaryId = java.util.UUID.randomUUID();
+            } else if (idClass.getSimpleName().equals("Long")) {
+                temporaryId = Long.valueOf(generateTemporaryId());
+            } else if (idClass.getSimpleName().equals("String")) {
+                temporaryId = String.valueOf(generateTemporaryId());
+            } else {
+                temporaryId = generateTemporaryId();
+            }
+
             dto = updateDtoWithId(dto, (ID) temporaryId);
             id = extractId(dto);
         }
 
         String hashKey = getRedisKey(id);
         getCacheStore().hashSet(hashKey, String.valueOf(id), dto);
-        
+
         // 부모 ID 인덱스 추가
         for (Map.Entry<Field, Class<?>> entry : parentEntityClassMap.entrySet()) {
             try {
@@ -423,7 +433,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
 
         getCacheStore().hashSet(hashKey, String.valueOf(id), dto);
-        
+
         // 부모 ID 인덱스 업데이트
         for (Map.Entry<Field, Class<?>> entry : parentEntityClassMap.entrySet()) {
             Field field = entry.getKey();
@@ -431,7 +441,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             try {
                 Object oldId = (existingDto != null) ? field.get(existingDto) : null;
                 Object newId = field.get(dto);
-                
+
                 if (oldId != null && !Objects.equals(oldId, newId)) {
                     removeIdFromParentIndex(hashKey, parentClass, oldId, id);
                 }
@@ -482,7 +492,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                         // Collection 타입인 경우 (OneToMany, ManyToMany) 기존 컬렉션을 유지하며 내용만 업데이트
                         if (sourceValue instanceof Collection<?> sourceCollection) {
                             Object targetValue = field.get(target);
-                            if (targetValue instanceof Collection targetCollection && targetCollection != sourceCollection) {
+                            if (targetValue instanceof Collection targetCollection
+                                    && targetCollection != sourceCollection) {
                                 try {
                                     targetCollection.clear();
                                     ((Collection) targetCollection).addAll(sourceCollection);
@@ -588,13 +599,12 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     @SuppressWarnings("unchecked")
-    private List<T> loadEntitiesByParentId(ID parentId) {
+    private List<T> loadEntitiesByParentId(Object parentId) {
         return loadEntitiesByParentId(parentId, null);
     }
 
-    private List<T> loadEntitiesByParentId(ID parentId, Class<?> parentClass) {
-        parentId = changeType(parentId);
-        
+    private List<T> loadEntitiesByParentId(Object parentId, Class<?> parentClass) {
+
         if (entityManager == null) {
             return Collections.emptyList();
         }
@@ -614,23 +624,23 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 System.err.println("[SharedSync] Criteria API findAll 실패: " + e.getMessage());
             }
         }
-        
+
         return Collections.emptyList();
     }
-    
+
     /**
      * JPA Criteria API를 사용하여 parentId로 엔티티 조회
      * Repository에 메서드가 없어도 동작합니다!
      */
     @SuppressWarnings("unchecked")
-    private List<T> loadEntitiesByCriteria(ID parentId) {
+    private List<T> loadEntitiesByCriteria(Object parentId) {
         return loadEntitiesByCriteria(parentId, null);
     }
 
     @SuppressWarnings("unchecked")
-    private List<T> loadEntitiesByCriteria(ID parentId, Class<?> targetParentClass) {
+    private List<T> loadEntitiesByCriteria(Object parentId, Class<?> targetParentClass) {
         Class<T> entityClass = getEntityClass();
-        
+
         if (parentEntityClassMap.isEmpty() || entityManager == null) {
             return loadAllEntitiesByCriteria();
         }
@@ -638,55 +648,69 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         CriteriaBuilder cb = entityManager.getCriteriaBuilder();
         CriteriaQuery<T> query = (CriteriaQuery<T>) cb.createQuery(entityClass);
         Root<T> root = (Root<T>) query.from(entityClass);
-        
-        List<Predicate> predicates = new ArrayList<>();
+
+        List<jakarta.persistence.criteria.Predicate> predicates = new ArrayList<>();
         for (Class<?> parentClass : parentEntityClassMap.values()) {
             // 특정 부모 클래스가 지정된 경우 해당 클래스만 처리
             if (targetParentClass != null && !parentClass.equals(targetParentClass)) {
                 continue;
             }
 
-            // Entity 클래스에서 해당 부모 타입을 가진 필드 찾기
-            for (Field field : entityClass.getDeclaredFields()) {
-                if (field.getType().equals(parentClass)) {
+            // Entity 클래스 계층에서 해당 부모 타입을 가진 필드 찾기
+            for (Field field : getAllFieldsInHierarchy(entityClass)) {
+                if (field.getType().isAssignableFrom(parentClass)) {
                     try {
-                        Path<?> parentPath = root.get(field.getName());
-                        Path<?> parentIdPath = parentPath.get("id");
-                        predicates.add(cb.equal(parentIdPath, parentId));
+                        // 부모 엔티티의 @Id 필드 정보를 동적으로 가져옴
+                        Field pIdField = locateEntityIdField(parentClass);
+                        if (pIdField == null)
+                            continue;
+
+                        String idFieldName = pIdField.getName();
+                        Class<?> pIdType = pIdField.getType();
+
+                        // parentId(보통 String)를 부모 ID의 실제 타입(UUID, Integer 등)으로 변환
+                        Object normalizedParentId = convertIdToType(pIdType, parentId);
+
+                        jakarta.persistence.criteria.Path<?> parentPath = root.get(field.getName());
+                        jakarta.persistence.criteria.Path<?> parentIdPath = parentPath.get(idFieldName);
+                        predicates.add(cb.equal(parentIdPath, normalizedParentId));
                     } catch (Exception e) {
-                        // JPA 필드가 아니거나 id 필드가 없는 경우 무시
+                        // JPA 필드가 아니거나 id 필드가 없는 경우 무시하고 로그 출력
+                        System.err.println("[SharedSync][WARN] Failed to build predicate for field " + field.getName()
+                                + ": " + e.getMessage());
                     }
                 }
             }
         }
 
         if (predicates.isEmpty()) {
-            return loadAllEntitiesByCriteria();
+            // 부모 정보가 있는 엔티티임에도 조건을 찾지 못한 경우, 전체 조회를 하지 않고 빈 목록 반환 (보안 및 격리)
+            return Collections.emptyList();
         }
 
         if (predicates.size() == 1) {
             query.where(predicates.get(0));
         } else {
-            query.where(cb.or(predicates.toArray(new Predicate[0])));
+            query.where(cb.or(predicates.toArray(new jakarta.persistence.criteria.Predicate[0])));
         }
-        
+
         return entityManager.createQuery(query).getResultList();
     }
-    
+
     /**
      * JPA Criteria API를 사용하여 모든 엔티티 조회 (루트 엔티티용)
      */
     @SuppressWarnings("unchecked")
     private List<T> loadAllEntitiesByCriteria() {
         Class<T> entityClass = getEntityClass();
-        
+
         CriteriaBuilder cb = entityManager.getCriteriaBuilder();
         CriteriaQuery<T> query = (CriteriaQuery<T>) cb.createQuery(entityClass);
         query.from(entityClass);
-        
+
         return entityManager.createQuery(query).getResultList();
     }
-    
+
     /**
      * JPA Criteria API를 사용하여 ID로 단일 엔티티 조회
      */
@@ -705,10 +729,12 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
             for (Field dtoField : dtoFields) {
                 String dtoFieldName = dtoField.getName();
-                if (dtoFieldName == null) continue;
+                if (dtoFieldName == null)
+                    continue;
                 if (dtoFieldName.endsWith("Id")) {
                     String entitySimple = dtoFieldName.substring(0, dtoFieldName.length() - 2); // e.g. "User"
-                    if (entitySimple.isEmpty()) continue;
+                    if (entitySimple.isEmpty())
+                        continue;
                     String candidate = Character.toLowerCase(entitySimple.charAt(0)) + entitySimple.substring(1);
 
                     for (Field f : getAllFieldsInHierarchy(entityClass)) {
@@ -725,7 +751,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                             if (jc != null) {
                                 String jcName = jc.name();
                                 if (jcName != null && !jcName.isBlank()) {
-                                    // DTO 필드명(예: userId)에서 추출한 candidate(user)와 
+                                    // DTO 필드명(예: userId)에서 추출한 candidate(user)와
                                     // JoinColumn 이름(user_id)이 유사한지 확인
                                     if (jcName.toLowerCase().contains(candidate.toLowerCase())) {
                                         relationName = f.getName();
@@ -737,7 +763,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                         }
 
                         if (relationName != null) {
-                            if (!relationsToFetch.contains(relationName)) relationsToFetch.add(relationName);
+                            if (!relationsToFetch.contains(relationName))
+                                relationsToFetch.add(relationName);
                             break;
                         }
                     }
@@ -776,12 +803,12 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     @Override
-    public final List<DTO> loadFromDatabaseByParentId(ID parentId) {
+    public final List<DTO> loadFromDatabaseByParentId(Object parentId) {
         return loadFromDatabaseByParentId(parentId, null);
     }
 
     @Override
-    public final List<DTO> loadFromDatabaseByParentId(ID parentId, Class<?> parentClass) {
+    public final List<DTO> loadFromDatabaseByParentId(Object parentId, Class<?> parentClass) {
         // 1. DB에서 최신 데이터 로드
         List<DTO> dtos = loadEntitiesByParentId(parentId, parentClass).stream()
                 .map(this::convertToDto)
@@ -801,19 +828,20 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
         return dtos;
     }
+
     @SuppressWarnings("unchecked")
     public List<? extends CacheDto<?>> loadFromDatabaseByParentIdUnchecked(Object parentId) {
-        return loadFromDatabaseByParentId((ID) parentId);
+        return loadFromDatabaseByParentId(parentId);
     }
 
     @SuppressWarnings("unchecked")
-    public final DTO loadFromDatabaseById(ID id){
+    public final DTO loadFromDatabaseById(ID id) {
         id = changeType(id);
 
         try {
             // EntityManager.find() 사용 - Repository 필요 없음!
             T entity = loadEntityByIdCriteria(id);
-            
+
             if (entity == null) {
                 return null;
             }
@@ -827,61 +855,78 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
     }
 
-    private ID changeType(ID id){
-        if(id == null){
+    private ID changeType(Object id) {
+        if (id == null) {
             return null;
         }
-        if(idClass.isInstance(id)){
-            return id;
+        if (idClass.isInstance(id)) {
+            return (ID) id;
         }
-        if(idClass.getSimpleName().equals("String")){
+        if (idClass.getSimpleName().equals("String")) {
             return (ID) id.toString();
         }
-        if(idClass.getSimpleName().equals("Integer")){
+        if (idClass.getSimpleName().equals("Integer")) {
             return (ID) Integer.valueOf(id.toString());
         }
-        if(idClass.getSimpleName().equals("Long")){
+        if (idClass.getSimpleName().equals("Long")) {
             return (ID) Long.valueOf(id.toString());
+        }
+        if (idClass.getSimpleName().equals("UUID")) {
+            return (ID) java.util.UUID.fromString(id.toString());
         }
         return null;
     }
 
     /**
-     * Convert arbitrary id value to the requested target type (entity id field type).
+     * Convert arbitrary id value to the requested target type (entity id field
+     * type).
      * Supports String, Integer/int, Long/long, Short, Byte, UUID.
      */
     private Object convertIdToType(Class<?> targetType, Object idValue) {
-        if (idValue == null) return null;
-        if (targetType == null) return idValue;
+        if (idValue == null)
+            return null;
+        if (targetType == null)
+            return idValue;
 
         // already correct type
-        if (targetType.isInstance(idValue)) return idValue;
+        if (targetType.isInstance(idValue))
+            return idValue;
 
         String s = idValue.toString();
         try {
-            if (targetType == String.class) return s;
-            if (targetType == Integer.class || targetType == int.class) return Integer.valueOf(s);
-            if (targetType == Long.class || targetType == long.class) return Long.valueOf(s);
-            if (targetType == Short.class || targetType == short.class) return Short.valueOf(s);
-            if (targetType == Byte.class || targetType == byte.class) return Byte.valueOf(s);
-            if (targetType == java.util.UUID.class) return java.util.UUID.fromString(s);
+            if (targetType == String.class)
+                return s;
+            if (targetType == Integer.class || targetType == int.class)
+                return Integer.valueOf(s);
+            if (targetType == Long.class || targetType == long.class)
+                return Long.valueOf(s);
+            if (targetType == Short.class || targetType == short.class)
+                return Short.valueOf(s);
+            if (targetType == Byte.class || targetType == byte.class)
+                return Byte.valueOf(s);
+            if (targetType == java.util.UUID.class)
+                return java.util.UUID.fromString(s);
         } catch (Exception e) {
             // fall through to return original value below
         }
         return idValue;
     }
 
-    /**
-     * ParentId로 캐시에서 Entity 리스트 조회
-     * Redis에 이미 저장된 데이터를 조회 (DB가 아닌 캐시에서)
-     */
     @Override
-    public List<T> findByParentId(ID parentId) {
+    public List<T> findByParentId(Object parentId) {
         return findByParentId(parentId, null);
     }
 
+    public List<T> findByParentId(java.util.UUID parentId) {
+        return findByParentId((Object) parentId, null);
+    }
+
+    public List<T> findByParentId(Integer parentId) {
+        return findByParentId((Object) parentId, null);
+    }
+
     @Override
-    public List<T> findByParentId(ID parentId, Class<?> parentClass) {
+    public List<T> findByParentId(Object parentId, Class<?> parentClass) {
         List<DTO> dtos = findDtosByParentId(parentId, parentClass);
 
         // Entity로 변환
@@ -895,12 +940,12 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
      * Redis에 저장된 해당 ParentId를 가진 모든 데이터를 삭제하고 삭제된 Entity 리스트 반환
      */
     @Override
-    public List<T> deleteByParentId(ID parentId) {
+    public List<T> deleteByParentId(Object parentId) {
         return deleteByParentId(parentId, null);
     }
 
     @Override
-    public List<T> deleteByParentId(ID parentId, Class<?> parentClass) {
+    public List<T> deleteByParentId(Object parentId, Class<?> parentClass) {
         if (parentIdFields.isEmpty()) {
             throw new UnsupportedOperationException("ParentId 필드가 없습니다.");
         }
@@ -927,11 +972,11 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
      * ParentId로 캐시에서 DTO 리스트 조회
      * 캐시에 이미 저장된 DTO를 직접 반환 (Entity 변환 없음)
      */
-    public List<DTO> findDtosByParentId(ID parentId) {
+    public List<DTO> findDtosByParentId(Object parentId) {
         return findDtosByParentId(parentId, null);
     }
 
-    public List<DTO> findDtosByParentId(ID parentId, Class<?> parentClass) {
+    public List<DTO> findDtosByParentId(Object parentId, Class<?> parentClass) {
         if (parentIdFields.isEmpty()) {
             throw new UnsupportedOperationException("ParentId 필드가 없습니다.");
         }
@@ -970,22 +1015,27 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         return allDtos.stream()
                 .filter(dto -> dto != null)
                 .filter(dto -> {
-                    if (parentId == null) return false;
-                    
+                    if (parentId == null)
+                        return false;
+
                     for (Map.Entry<Field, Class<?>> entry : parentEntityClassMap.entrySet()) {
                         // 클래스가 지정된 경우 해당 클래스 필드만 확인
                         if (parentClass != null && !entry.getValue().equals(parentClass)) {
                             continue;
                         }
-                        
+
                         try {
                             Object dtoParentId = entry.getKey().get(dto);
-                            if (dtoParentId == null) continue;
-                            
-                            if (parentId.getClass().isInstance(dtoParentId) || dtoParentId.getClass().isInstance(parentId)) {
-                                if (Objects.equals(parentId, dtoParentId)) return true;
+                            if (dtoParentId == null)
+                                continue;
+
+                            if (parentId.getClass().isInstance(dtoParentId)
+                                    || dtoParentId.getClass().isInstance(parentId)) {
+                                if (Objects.equals(parentId, dtoParentId))
+                                    return true;
                             }
-                            if (parentId.toString().equals(dtoParentId.toString())) return true;
+                            if (parentId.toString().equals(dtoParentId.toString()))
+                                return true;
                         } catch (IllegalAccessException e) {
                             // ignore
                         }
@@ -1003,7 +1053,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
      * 예: findByField("cacheUserId", 1L) → cacheUserId가 1인 모든 DTO 반환
      * 
      * @param fieldName DTO의 필드명 (예: "cacheUserId", "cacheBookId", "category")
-     * @param value 검색할 값
+     * @param value     검색할 값
      * @return 매칭되는 DTO 리스트
      */
     public List<DTO> findByField(String fieldName, Object value) {
@@ -1122,7 +1172,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     private boolean matchesFieldValue(DTO dto, Field field, Object expectedValue) {
         try {
             Object actualValue = field.get(dto);
-            
+
             if (actualValue == null && expectedValue == null) {
                 return true;
             }
@@ -1187,12 +1237,12 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                         List<Object> entities = new ArrayList<>();
                         for (Object id : idList) {
                             try {
-                                    Object normalizedId = changeType((ID) id);
-                                    Object ref = entityManager.getReference(elementType, normalizedId);
-                                    entities.add(ref);
-                                } catch (Exception e) {
-                                    // skip missing/invalid ids
-                                }
+                                Object normalizedId = changeType((ID) id);
+                                Object ref = entityManager.getReference(elementType, normalizedId);
+                                entities.add(ref);
+                            } catch (Exception e) {
+                                // skip missing/invalid ids
+                            }
                         }
                         params[i] = entities;
                     } else {
@@ -1294,14 +1344,15 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 if (tableNameAnnotation != null && tableNameAnnotation.value().equalsIgnoreCase(tableName)) {
                     field.setAccessible(true);
                     Object val = field.get(dto);
-                    if (val != null) return val;
+                    if (val != null)
+                        return val;
                 }
             }
 
             // 1순위: DTO에서 @ParentId(entityClass)가 붙은 필드 찾기
             for (Field field : getAllFieldsInHierarchy(dtoClass)) {
                 field.setAccessible(true);
-                
+
                 // @ParentId 어노테이션 확인 - 엔티티 클래스와 일치하는지
                 ParentId parentIdAnnotation = field.getAnnotation(ParentId.class);
                 if (parentIdAnnotation != null && parentIdAnnotation.value() == entityClass) {
@@ -1335,6 +1386,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     /**
      * 엔티티 클래스에서 테이블 이름을 가져옵니다.
+     * 
      * @Table 어노테이션이 있으면 해당 이름을 사용하고, 없으면 클래스 이름을 사용합니다.
      */
     private String getTableName(Class<?> entityClass) {
@@ -1359,8 +1411,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         return null;
     }
 
-
-
     @SuppressWarnings("unchecked")
     private Class<T> getEntityClass() {
         Type superClass = getClass().getGenericSuperclass();
@@ -1371,7 +1421,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         throw new IllegalStateException("Entity 클래스를 추출할 수 없습니다.");
     }
 
-    private Field findFieldWithAnnotation(Class<?> clazz, Class<? extends java.lang.annotation.Annotation> annotationClass) {
+    private Field findFieldWithAnnotation(Class<?> clazz,
+            Class<? extends java.lang.annotation.Annotation> annotationClass) {
         for (Field field : clazz.getDeclaredFields()) {
             if (field.isAnnotationPresent(annotationClass)) {
                 return field;
@@ -1380,7 +1431,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         return null;
     }
 
-    private Method findMethodWithAnnotation(Class<?> clazz, Class<? extends java.lang.annotation.Annotation> annotationClass) {
+    private Method findMethodWithAnnotation(Class<?> clazz,
+            Class<? extends java.lang.annotation.Annotation> annotationClass) {
         for (Method method : clazz.getDeclaredMethods()) {
             if (method.isAnnotationPresent(annotationClass)) {
                 return method;
@@ -1402,10 +1454,11 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         return null;
     }
 
-    public DTO findDtoById(ID id){
+    public DTO findDtoById(ID id) {
         return getCacheStore().hashGet(getRedisKey(id), String.valueOf(id));
     }
-    public List<DTO> findDtoListByParentId(ID parentId){
+
+    public List<DTO> findDtoListByParentId(ID parentId) {
         return findDtosByParentId(parentId);
     }
 
@@ -1484,8 +1537,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
 
         List<HistoryAction> cascadedActions = new ArrayList<>();
-        Map<String, AutoCacheRepository<?, ?, ?>> repositories =
-                (Map<String, AutoCacheRepository<?, ?, ?>>) (Map<?, ?>) applicationContext.getBeansOfType(AutoCacheRepository.class);
+        Map<String, AutoCacheRepository<?, ?, ?>> repositories = (Map<String, AutoCacheRepository<?, ?, ?>>) (Map<?, ?>) applicationContext
+                .getBeansOfType(AutoCacheRepository.class);
         Class<T> entityClass = getEntityClass();
 
         for (AutoCacheRepository<?, ?, ?> repository : repositories.values()) {
@@ -1507,7 +1560,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                                 .afterData(null)
                                 .subActions(new ArrayList<>())
                                 .build();
-                        
+
                         // 각 자식 DTO에 대해 재귀적으로 수집
                         for (Object childDto : childDtos) {
                             Object childId = repository.extractIdFromDtoUnchecked(childDto);
@@ -1542,8 +1595,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             return;
         }
 
-        Map<String, AutoCacheRepository<?, ?, ?>> repositories =
-                (Map<String, AutoCacheRepository<?, ?, ?>>) (Map<?, ?>) applicationContext.getBeansOfType(AutoCacheRepository.class);
+        Map<String, AutoCacheRepository<?, ?, ?>> repositories = (Map<String, AutoCacheRepository<?, ?, ?>>) (Map<?, ?>) applicationContext
+                .getBeansOfType(AutoCacheRepository.class);
         Class<T> entityClass = getEntityClass();
 
         for (AutoCacheRepository<?, ?, ?> repository : repositories.values()) {
@@ -1563,7 +1616,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     @SuppressWarnings("unchecked")
     private void removeEntriesByParentInternal(Object parentIdObject) {
-        if (parentIdObject == null) return;
+        if (parentIdObject == null)
+            return;
         for (Class<?> parentClass : parentEntityClassMap.values()) {
             removeEntriesByParentInternal(parentIdObject, parentClass);
         }
@@ -1574,7 +1628,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         if (parentIdFields.isEmpty() || parentIdObject == null) {
             return;
         }
-        
+
         ID parentId = (ID) parentIdObject;
         List<DTO> dtos = findDtosByParentId(parentId, parentClass);
         if (dtos.isEmpty()) {
@@ -1592,17 +1646,18 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         if (parentIdFields.isEmpty() || parentIdObject == null) {
             return;
         }
-        
+
         ID parentId = (ID) parentIdObject;
         syncToDatabaseByParentId(parentId, parentClass);
     }
 
     // ==== 동기화 메소드 ====
 
-    public static void syncHierarchyToDatabaseByRootId(int rootId){
+    public static void syncHierarchyToDatabaseByRootId(int rootId) {
         //
     }
-    public static void syncHierarchyToDatabaseByRootId(String rootId){
+
+    public static void syncHierarchyToDatabaseByRootId(String rootId) {
 
     }
 
@@ -1616,7 +1671,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
         // 부모가 있을 때
         Object parentIdValue = getParentIdValue(dto);
-        if (parentIdValue instanceof Number number && number.longValue() <0) {
+        if (parentIdValue instanceof Number number && number.longValue() < 0) {
             return null;
         }
         return saveToDatabase(dto);
@@ -1630,11 +1685,11 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     /**
      * 캐시에 존재하는 ParentId 하위 DTO들을 DB와 동기화하며, 캐시에 없어진 엔티티는 DB에서도 삭제합니다.
      */
-    public List<DTO> syncToDatabaseByParentId(ID parentId) {
+    public List<DTO> syncToDatabaseByParentId(Object parentId) {
         return syncToDatabaseByParentId(parentId, null);
     }
 
-    public List<DTO> syncToDatabaseByParentId(ID parentId, Class<?> parentClass) {
+    public List<DTO> syncToDatabaseByParentId(Object parentId, Class<?> parentClass) {
         if (parentIdFields.isEmpty()) {
             throw new UnsupportedOperationException("ParentId 필드가 없습니다.");
         }
@@ -1686,7 +1741,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         if (parentIdFields.isEmpty() || parentId == null) {
             return;
         }
-        
+
         boolean typeMatched = false;
         for (Field field : parentIdFields) {
             if (field.getType().isInstance(parentId)) {
@@ -1694,7 +1749,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 break;
             }
         }
-        if (!typeMatched) return;
+        if (!typeMatched)
+            return;
 
         ID typedParentId = (ID) parentId;
         List<T> persistedEntities = loadEntitiesByParentId(typedParentId);
@@ -1704,10 +1760,10 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
         Set<ID> allowedIds = persistentIds == null ? Collections.emptySet()
                 : persistentIds.stream()
-                .filter(Objects::nonNull)
-                .filter(id -> entityIdField.getType().isInstance(id))
-                .map(id -> (ID) id)
-                .collect(Collectors.toSet());
+                        .filter(Objects::nonNull)
+                        .filter(id -> entityIdField.getType().isInstance(id))
+                        .map(id -> (ID) id)
+                        .collect(Collectors.toSet());
 
         List<T> targets = persistedEntities.stream()
                 .filter(entity -> {
@@ -1730,8 +1786,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             return;
         }
 
-        Map<String, AutoCacheRepository<?, ?, ?>> repositories =
-                (Map<String, AutoCacheRepository<?, ?, ?>>) (Map<?, ?>) applicationContext.getBeansOfType(AutoCacheRepository.class);
+        Map<String, AutoCacheRepository<?, ?, ?>> repositories = (Map<String, AutoCacheRepository<?, ?, ?>>) (Map<?, ?>) applicationContext
+                .getBeansOfType(AutoCacheRepository.class);
         Class<T> entityClass = getEntityClass();
 
         for (T entity : entitiesToDelete) {
@@ -1790,7 +1846,9 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                         f.setAccessible(true);
                         Object val = f.get(entityToSave);
                         if (val == null) {
-                            System.err.println("[SharedSync][WARN] Required ManyToOne relation is null - skipping DB save: " + entityClazz.getSimpleName() + "." + f.getName());
+                            System.err.println(
+                                    "[SharedSync][WARN] Required ManyToOne relation is null - skipping DB save: "
+                                            + entityClazz.getSimpleName() + "." + f.getName());
                             return dto; // skip saving to avoid FK violation
                         }
                     }
@@ -1834,7 +1892,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
         return updatedDto;
     }
-    
+
     /**
      * EntityManager를 사용하여 엔티티 저장 (persist 또는 merge)
      */
@@ -1868,7 +1926,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             }
         }
     }
-    
+
     /**
      * EntityManager를 사용하여 여러 엔티티 삭제
      */
@@ -1909,7 +1967,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         return id != null && !isTemporaryId(id);
     }
 
-
     private Object getParentIdValue(DTO dto) {
         if (parentIdFields.isEmpty()) {
             return null;
@@ -1918,7 +1975,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             // 첫 번째 non-null 부모 ID 반환
             for (Field field : parentIdFields) {
                 Object val = field.get(dto);
-                if (val != null) return val;
+                if (val != null)
+                    return val;
             }
             return null;
         } catch (IllegalAccessException e) {
@@ -1942,8 +2000,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             return;
         }
 
-        Map<String, AutoCacheRepository<?, ?, ?>> repositories =
-                (Map<String, AutoCacheRepository<?, ?, ?>>) (Map<?, ?>) applicationContext.getBeansOfType(AutoCacheRepository.class);
+        Map<String, AutoCacheRepository<?, ?, ?>> repositories = (Map<String, AutoCacheRepository<?, ?, ?>>) (Map<?, ?>) applicationContext
+                .getBeansOfType(AutoCacheRepository.class);
         Class<T> entityClass = getEntityClass();
         for (AutoCacheRepository<?, ?, ?> repository : repositories.values()) {
             if (repository == this) {
@@ -1974,13 +2032,14 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         if (oldParentId == null || newParentId == null) {
             return;
         }
-        
+
         for (Field field : parentIdFields) {
             if (field.getType().isInstance(oldParentId) && field.getType().isInstance(newParentId)) {
                 // Hash에서 해당 부모를 가진 ID 목록 가져오기 (인덱스 활용)
                 String hashKey = getRedisKey(null);
                 Class<?> parentClass = parentEntityClassMap.get(field);
-                if (parentClass == null) continue;
+                if (parentClass == null)
+                    continue;
 
                 String oldIndexField = getParentIndexField(parentClass, oldParentId);
                 String idListStr = getCacheStore().hashGetString(hashKey, oldIndexField);

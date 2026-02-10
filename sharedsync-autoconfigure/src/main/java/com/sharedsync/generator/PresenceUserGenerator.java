@@ -32,7 +32,7 @@ public class PresenceUserGenerator extends AbstractProcessor {
     }
 
     // =======================
-    //   내부 DTO 클래스 구조
+    // 내부 DTO 클래스 구조
     // =======================
 
     @Getter
@@ -41,7 +41,7 @@ public class PresenceUserGenerator extends AbstractProcessor {
         private String entityPath;
         private String entityName;
         private String idFieldName;
-        private String idFieldType;    // [추가됨] ID 필드의 타입 (ex: String, Long)
+        private String idFieldType; // [추가됨] ID 필드의 타입 (ex: String, Long)
         private String[] fields;
 
         private String repositoryPath;
@@ -54,7 +54,7 @@ public class PresenceUserGenerator extends AbstractProcessor {
     }
 
     // =======================
-    //     PROCESS 시작
+    // PROCESS 시작
     // =======================
 
     @Override
@@ -95,7 +95,7 @@ public class PresenceUserGenerator extends AbstractProcessor {
     }
 
     // =======================
-    //   필드 타입 탐색 [수정됨]
+    // 필드 타입 탐색 [수정됨]
     // =======================
 
     private void findAndSetIdField(Element element, String idFieldName, PresenceUserInformation info) {
@@ -107,7 +107,8 @@ public class PresenceUserGenerator extends AbstractProcessor {
                     // @Id 어노테이션이 있는지 확인
                     for (var annotationMirror : enclosed.getAnnotationMirrors()) {
                         String annType = annotationMirror.getAnnotationType().toString();
-                        if (annType.endsWith(".Id")) { // javax.persistence.Id, jakarta.persistence.Id, org.springframework.data.annotation.Id 등
+                        if (annType.endsWith(".Id")) { // javax.persistence.Id, jakarta.persistence.Id,
+                                                       // org.springframework.data.annotation.Id 등
                             isTarget = true;
                             break;
                         }
@@ -118,7 +119,12 @@ public class PresenceUserGenerator extends AbstractProcessor {
 
                 if (isTarget) {
                     info.setIdFieldName(enclosed.getSimpleName().toString());
-                    info.setIdFieldType(removePath(enclosed.asType().toString()));
+                    String type = enclosed.asType().toString();
+                    if (type.contains("UUID")) {
+                        info.setIdFieldType("UUID");
+                    } else {
+                        info.setIdFieldType(removePath(type));
+                    }
                     return;
                 }
             }
@@ -129,7 +135,7 @@ public class PresenceUserGenerator extends AbstractProcessor {
     }
 
     // =======================
-    //   Repository 탐색
+    // Repository 탐색
     // =======================
 
     private void findRepository(PresenceUserInformation info, RoundEnvironment roundEnv) {
@@ -138,7 +144,8 @@ public class PresenceUserGenerator extends AbstractProcessor {
 
             if (repoElement instanceof TypeElement typeElement) {
 
-                if (!typeElement.getKind().isInterface()) continue;
+                if (!typeElement.getKind().isInterface())
+                    continue;
 
                 for (javax.lang.model.type.TypeMirror iface : typeElement.getInterfaces()) {
 
@@ -149,7 +156,8 @@ public class PresenceUserGenerator extends AbstractProcessor {
                             continue;
 
                         List<? extends javax.lang.model.type.TypeMirror> typeArgs = declaredType.getTypeArguments();
-                        if (typeArgs.size() != 2) continue;
+                        if (typeArgs.size() != 2)
+                            continue;
 
                         String repoEntityType = typeArgs.get(0).toString();
 
@@ -164,15 +172,15 @@ public class PresenceUserGenerator extends AbstractProcessor {
     }
 
     // =======================
-    //   Provider 파일 생성
+    // Provider 파일 생성
     // =======================
 
     private void generateProvider(PresenceUserInformation info) {
 
         if (info.getRepositoryName() == null) {
             // Repository를 못 찾았으면 생성 스킵 혹은 로그 출력
-            processingEnv.getMessager().printMessage(javax.tools.Diagnostic.Kind.WARNING, 
-                "Repository not found for entity: " + info.getEntityName());
+            processingEnv.getMessager().printMessage(javax.tools.Diagnostic.Kind.WARNING,
+                    "Repository not found for entity: " + info.getEntityName());
             return;
         }
 
@@ -183,11 +191,18 @@ public class PresenceUserGenerator extends AbstractProcessor {
                 StringBuilder mapBuilder = new StringBuilder();
                 for (String field : info.getFields()) {
                     String getter = "get" + capitalizeFirst(field) + "()";
-                    mapBuilder.append("                                            info.put(\"").append(field).append("\", user.").append(getter).append(");\n");
+                    mapBuilder.append("                                            info.put(\"").append(field)
+                            .append("\", user.").append(getter).append(");\n");
                 }
-                
+
                 // ID 타입에 따른 변환 로직 (String -> Long 등)
                 String idConversion = getChangeType(info.getIdFieldType());
+
+                // UUID import 추가 (idFieldType이 UUID인 경우)
+                String uuidImport = "";
+                if (info.getIdFieldType() != null && info.getIdFieldType().contains("UUID")) {
+                    uuidImport = "import java.util.UUID;\n";
+                }
 
                 writer.write("""
                         package %s;
@@ -198,7 +213,7 @@ public class PresenceUserGenerator extends AbstractProcessor {
                         import org.springframework.stereotype.Component;
                         import java.util.Map;
                         import java.util.HashMap;
-
+                        %s
                         @Component
                         @RequiredArgsConstructor
                         public class %s implements UserProvider {
@@ -216,13 +231,15 @@ public class PresenceUserGenerator extends AbstractProcessor {
                             }
                         }
                         """.formatted(
-                        info.getProviderPackage(),      // 1. package
-                        info.getRepositoryPath(),       // 2. import repo
-                        info.getProviderClassName(),    // 3. class name
-                        info.getRepositoryName(),       // 4. field type
-                        idConversion,                   // 5. findById arg
-                        mapBuilder.toString()           // 6. map population
+                        info.getProviderPackage(), // 1. package
+                        info.getRepositoryPath(), // 2. import repo
+                        uuidImport, // 3. UUID import (empty if not needed)
+                        info.getProviderClassName(), // 4. class name
+                        info.getRepositoryName(), // 5. field type
+                        idConversion, // 6. findById arg
+                        mapBuilder.toString() // 7. map population
                 ));
+
             }
         } catch (IOException e) {
             processingEnv.getMessager().printMessage(javax.tools.Diagnostic.Kind.ERROR,
@@ -231,7 +248,7 @@ public class PresenceUserGenerator extends AbstractProcessor {
     }
 
     // =======================
-    //      Util 함수들
+    // Util 함수들
     // =======================
 
     public static String removePath(String fullPath) {
@@ -242,13 +259,19 @@ public class PresenceUserGenerator extends AbstractProcessor {
     }
 
     public static String capitalizeFirst(String str) {
-        if (str == null || str.isEmpty()) return "";
+        if (str == null || str.isEmpty())
+            return "";
         return str.substring(0, 1).toUpperCase() + str.substring(1);
     }
 
     public static String getChangeType(String fieldType) {
-        if (fieldType == null) return "userId";
-        
+        if (fieldType == null)
+            return "userId";
+
+        if (fieldType.endsWith("UUID")) {
+            return "java.util.UUID.fromString(userId)";
+        }
+
         switch (fieldType) {
             case "String":
                 return "userId";
@@ -257,6 +280,8 @@ public class PresenceUserGenerator extends AbstractProcessor {
             case "Integer":
             case "int":
                 return "Integer.parseInt(userId)";
+            case "UUID":
+                return "java.util.UUID.fromString(userId)";
             default:
                 return "userId"; // 기본적으로 String 취급
         }

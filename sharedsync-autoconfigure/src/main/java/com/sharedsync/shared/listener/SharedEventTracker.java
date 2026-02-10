@@ -25,13 +25,14 @@ public class SharedEventTracker {
     @EventListener
     public void handleSubscribeEvent(SessionSubscribeEvent event) {
         String channel = " ";
-        if (presenceProperties.isEnabled()){
+        if (presenceProperties.isEnabled()) {
             channel = presenceRootResolver.getChannel();
         }
 
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
         String destination = accessor.getDestination();
-        if (destination == null) return;
+        if (destination == null)
+            return;
 
         log.debug("[Presence] Subscribe event detected. destination={}, expected_channel={}", destination, channel);
         if (destination.startsWith("/topic/" + channel)) {
@@ -54,25 +55,34 @@ public class SharedEventTracker {
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
         String userId = extractUserId(accessor);
         String sessionId = accessor.getSessionId();
-        
+
         log.info("[Presence] Disconnect event: userId={}, sessionId={}", userId, sessionId);
         presenceSessionManager.handleDisconnect(userId, sessionId);
     }
 
     private String extractUserId(StompHeaderAccessor accessor) {
+        // 1. SessionAttributes에서 확인
         Object value = accessor.getSessionAttributes().get(USER_ID);
-        if (value == null) {
-            return null;
-        }
-        try {
+        if (value != null) {
             return String.valueOf(value);
-        } catch (NumberFormatException ex) {
-            return null;
         }
+
+        // 2. Principal에서 확인 (WsAuthChannelInterceptor에 의해 설정됨)
+        java.security.Principal principal = accessor.getUser();
+        if (principal != null) {
+            String name = principal.getName();
+            if (name != null && name.startsWith("u:")) {
+                return name.substring(2);
+            }
+            return name;
+        }
+
+        return null;
     }
 
     private String parseRoomId(String destination) {
-        if (destination == null) return null;
+        if (destination == null)
+            return null;
         String[] tokens = destination.split("/");
         if (tokens.length < 3) {
             return null;

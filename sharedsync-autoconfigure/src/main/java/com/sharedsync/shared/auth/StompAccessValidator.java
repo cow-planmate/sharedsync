@@ -13,5 +13,5 @@ public interface StompAccessValidator {
     /**
      * 목적지에 대한 접근 권한을 검증한다. 검증 실패 시 예외를 던진다.
      */
-    void validate(int userId, String destination);
+    void validate(String userId, String destination);
 }

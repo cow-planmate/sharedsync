@@ -66,9 +66,11 @@ public class ControllerGenerator {
 		}
 		source.append("\n");
 
-		source.append("    public SharedSyncController(ObjectMapper objectMapper, RedisSyncService redisSyncService, HistoryService historyService, PresenceStorage presenceStorage");
+		source.append(
+				"    public SharedSyncController(ObjectMapper objectMapper, RedisSyncService redisSyncService, HistoryService historyService, PresenceStorage presenceStorage");
 		for (CacheInformation info : cacheInfoList) {
-			source.append(", ").append(info.getServiceClassName()).append(" ").append(decapitalizeFirst(info.getServiceClassName()));
+			source.append(", ").append(info.getServiceClassName()).append(" ")
+					.append(decapitalizeFirst(info.getServiceClassName()));
 		}
 		source.append(") {\n");
 		source.append("        this.objectMapper = objectMapper;\n");
@@ -82,20 +84,20 @@ public class ControllerGenerator {
 		source.append("    }\n\n");
 
 		source.append("    @MessageMapping(\"/{roomId}\")\n");
-		source.append("    public void handle(@DestinationVariable(\"roomId\") int roomId, \n");
+		source.append("    public void handle(@DestinationVariable(\"roomId\") String roomId, \n");
 		source.append("                         @Payload java.util.Map<String, Object> payload) {\n\n");
 
 		source.append("        String sessionId = SimpAttributesContextHolder.currentAttributes().getSessionId();\n");
 		source.append("        String mappedRoomId = presenceStorage.getRootIdBySessionId(sessionId);\n");
-		source.append("        if (mappedRoomId == null || !mappedRoomId.equals(String.valueOf(roomId))) return;\n\n");
+		source.append("        if (mappedRoomId == null || !mappedRoomId.equals(roomId)) return;\n\n");
 
 		source.append("        String action = (String) payload.get(\"action\");\n");
 		source.append("        if (\"undo\".equalsIgnoreCase(action)) {\n");
-		source.append("            historyService.undo(String.valueOf(roomId));\n");
+		source.append("            historyService.undo(roomId);\n");
 		source.append("            return;\n");
 		source.append("        }\n");
 		source.append("        if (\"redo\".equalsIgnoreCase(action)) {\n");
-		source.append("            historyService.redo(String.valueOf(roomId));\n");
+		source.append("            historyService.redo(roomId);\n");
 		source.append("            return;\n");
 		source.append("        }\n\n");
 
@@ -108,8 +110,10 @@ public class ControllerGenerator {
 			String entityLower = info.getEntityName().toLowerCase();
 			String serviceVar = decapitalizeFirst(info.getServiceClassName());
 			source.append("            case \"").append(entityLower).append("\": {\n");
-			source.append("                ").append(info.getRequestClassName()).append(" request = objectMapper.convertValue(payload, ").append(info.getRequestClassName()).append(".class);\n");
-			source.append("                request.setRootId(String.valueOf(roomId));\n");
+			source.append("                ").append(info.getRequestClassName())
+					.append(" request = objectMapper.convertValue(payload, ").append(info.getRequestClassName())
+					.append(".class);\n");
+			source.append("                request.setRootId(roomId);\n");
 			source.append("                result = handleAction(").append(serviceVar).append(", request);\n");
 			source.append("                break;\n");
 			source.append("            }\n");
@@ -122,7 +126,8 @@ public class ControllerGenerator {
 		source.append("        }\n");
 		source.append("    }\n\n");
 
-		source.append("    private <Req extends WRequest, Res extends WResponse> Object handleAction(com.sharedsync.shared.service.SharedService<Req, Res> service, Req request) {\n");
+		source.append(
+				"    private <Req extends WRequest, Res extends WResponse> Object handleAction(com.sharedsync.shared.service.SharedService<Req, Res> service, Req request) {\n");
 		source.append("        String action = request.getAction();\n");
 		source.append("        if (action == null) return null;\n\n");
 		source.append("        Object result = switch (action.toLowerCase()) {\n");
@@ -144,7 +149,8 @@ public class ControllerGenerator {
 
 		// 파일 생성
 		try {
-			JavaFileObject file = processingEnv.getFiler().createSourceFile("sharedsync.controller.SharedSyncController");
+			JavaFileObject file = processingEnv.getFiler()
+					.createSourceFile("sharedsync.controller.SharedSyncController");
 			Writer writer = file.openWriter();
 			writer.write(source.toString());
 			writer.close();
