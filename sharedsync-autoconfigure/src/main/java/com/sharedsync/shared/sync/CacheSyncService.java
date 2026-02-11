@@ -1,5 +1,6 @@
 package com.sharedsync.shared.sync;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -18,6 +19,19 @@ import lombok.RequiredArgsConstructor;
 public class CacheSyncService {
     private final List<AutoCacheRepository<?, ?, ?>> cacheRepositories;
 
+    /**
+     * 캐시 삭제 예약 항목 (Phase 2에서 일괄 삭제용)
+     */
+    private static class CacheDeletionEntry {
+        final AutoCacheRepository<?, ?, ?> repository;
+        final Object id;
+
+        CacheDeletionEntry(AutoCacheRepository<?, ?, ?> repository, Object id) {
+            this.repository = repository;
+            this.id = id;
+        }
+    }
+
     @Transactional
     public void syncToDatabase(String rootId) {
         AutoCacheRepository<?, ?, ?> rootRepository = cacheRepositories.stream()
@@ -25,10 +39,20 @@ public class CacheSyncService {
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("루트 DTO를 가진 AutoCacheRepository를 찾을 수 없습니다."));
 
-        syncRecursively(rootRepository, rootId);
+        // Phase 1: DB 동기화 수행 (캐시는 그대로 유지, 삭제 대상만 수집)
+        List<CacheDeletionEntry> deletionQueue = new ArrayList<>();
+        syncRecursively(rootRepository, rootId, deletionQueue);
+
+        // Phase 2: 캐시 일괄 삭제
+        // DB 동기화가 완전히 끝난 후에 캐시를 삭제하므로,
+        // 조회 시 "캐시 전부 있음" 또는 "캐시 전부 없음(DB fallback)" 상태만 노출됩니다.
+        for (CacheDeletionEntry entry : deletionQueue) {
+            entry.repository.deleteCacheByIdUnchecked(entry.id);
+        }
     }
 
-    private void syncRecursively(AutoCacheRepository<?, ?, ?> repository, Object id) {
+    private void syncRecursively(AutoCacheRepository<?, ?, ?> repository, Object id,
+            List<CacheDeletionEntry> deletionQueue) {
         if (repository == null || id == null) {
             return;
         }
@@ -68,9 +92,9 @@ public class CacheSyncService {
 
             childRepo.deleteEntitiesNotInCache(id, persistentIds);
 
-            persistentIds.forEach(childId -> syncRecursively(childRepo, childId));
+            persistentIds.forEach(childId -> syncRecursively(childRepo, childId, deletionQueue));
         }
-        // 동기화가 끝난 항목의 캐시를 제거합니다 (하위 항목은 재귀적으로 먼저 제거됨)
-        repository.deleteCacheByIdUnchecked(id);
+        // 캐시 삭제를 바로 하지 않고, 삭제 대상 큐에 추가 (Phase 2에서 일괄 삭제)
+        deletionQueue.add(new CacheDeletionEntry(repository, id));
     }
 }
