@@ -107,4 +107,18 @@ public interface CacheRepository<T, ID, DTO> {
     default void clear() {
         throw new UnsupportedOperationException("clear not implemented");
     }
+
+    /**
+     * 현재 동기화(DB Flush) 진행 중인지 확인
+     */
+    default boolean isSyncing(Object id) {
+        return false;
+    }
+
+    /**
+     * 현재 캐시 로딩(Initialization) 진행 중인지 확인
+     */
+    default boolean isLoading(Object id) {
+        return false;
+    }
 }

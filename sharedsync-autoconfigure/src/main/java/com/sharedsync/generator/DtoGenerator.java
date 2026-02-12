@@ -25,8 +25,7 @@ public class DtoGenerator {
 
     public static boolean process(CacheInformation cacheInfo, ProcessingEnvironment processingEnv) {
 
-        String source =
-            "package " + cacheInfo.getDtoPath() + ";\n"
+        String source = "package " + cacheInfo.getDtoPath() + ";\n"
                 + "import com.sharedsync.shared.annotation.*;\n"
                 + "import com.sharedsync.shared.dto.CacheDto;\n"
                 + writeEntityPath(cacheInfo)
@@ -60,7 +59,7 @@ public class DtoGenerator {
     // helper: ManyToOne 타입 매칭 정확히 처리
     // ==========================================
     private static boolean isSameEntity(FieldInfo fieldInfo, RelatedEntity related) {
-        String fieldType = fieldInfo.getType();         // ex) practice...User 또는 User
+        String fieldType = fieldInfo.getType(); // ex) practice...User 또는 User
         String simple = Generator.removePath(related.getEntityPath()); // User
 
         return fieldType.endsWith("." + simple)
@@ -78,13 +77,14 @@ public class DtoGenerator {
             sb.append("import ").append(cacheInfo.getEntityPath()).append(";\n");
         }
         // Import the per-entity factory class from the AllArgsConstructor package
-        sb.append("import sharedsync.allArgsConstructor.").append(cacheInfo.getEntityName()).append("AllArgsConstructor;\n");
+        sb.append("import sharedsync.allArgsConstructor.").append(cacheInfo.getEntityName())
+                .append("AllArgsConstructor;\n");
         Set<String> collectionImports = new HashSet<>();
         for (RelatedEntity relatedEntity : cacheInfo.getRelatedEntities()) {
             if (relatedEntity.getEntityPath() != null) {
                 sb.append("import ").append(relatedEntity.getEntityPath()).append(";\n");
             }
-            for(FieldInfo fieldInfo : cacheInfo.getEntityFields()) {
+            for (FieldInfo fieldInfo : cacheInfo.getEntityFields()) {
                 if ((fieldInfo.isOneToMany() || fieldInfo.isManyToMany()) && isSameEntity(fieldInfo, relatedEntity)) {
                     String collectionType = fieldInfo.getCollectionPath();
                     if (collectionType != null && !collectionType.isEmpty()) {
@@ -97,7 +97,8 @@ public class DtoGenerator {
             sb.append("import ").append(collectionImport).append(";\n");
         }
         // If any OneToMany/ManyToMany collections exist, generated DTOs will reference
-        // Persistence.getPersistenceUtil().isLoaded(...) to avoid LazyInitializationException.
+        // Persistence.getPersistenceUtil().isLoaded(...) to avoid
+        // LazyInitializationException.
         boolean hasCollectionRelation = cacheInfo.getEntityFields().stream()
                 .anyMatch(f -> f.isOneToMany() || f.isManyToMany());
         if (hasCollectionRelation) {
@@ -119,7 +120,8 @@ public class DtoGenerator {
         List<FieldInfo> fields = cacheInfo.getEntityFields();
         boolean first = true;
         for (FieldInfo field : fields) {
-            if (field.isIgnored()) continue;
+            if (field.isIgnored())
+                continue;
             if (field.isManyToOne() || field.isOneToOne()) {
                 if (!first) {
                     sb.append(", ");
@@ -134,7 +136,8 @@ public class DtoGenerator {
                 } else {
                     first = false;
                 }
-                String colletionType = field.getCollectionPath().split("\\.")[field.getCollectionPath().split("\\.").length - 1];
+                String colletionType = field.getCollectionPath()
+                        .split("\\.")[field.getCollectionPath().split("\\.").length - 1];
                 sb.append(colletionType).append("<");
                 sb.append(Generator.removePath(field.getType())).append("> ").append(field.getName());
             }
@@ -175,7 +178,8 @@ public class DtoGenerator {
         }
 
         // remove trailing comma and newline
-        if (sb.length() >= 2) sb.setLength(sb.length() - 2);
+        if (sb.length() >= 2)
+            sb.setLength(sb.length() - 2);
         sb.append("\n        );\n");
         sb.append("    }\n\n");
 
@@ -183,38 +187,42 @@ public class DtoGenerator {
     }
 
     // ==========================================
-    // Reflection cache and helper method (generated when collection relations exist)
+    // Reflection cache and helper method (generated when collection relations
+    // exist)
     // ==========================================
     private static String writeReflectionCacheAndHelpers(CacheInformation cacheInfo) {
         StringBuilder sb = new StringBuilder();
 
         List<FieldInfo> fields = cacheInfo.getEntityFields();
 
-        // collect fields that need reflection helpers: ManyToOne (single id) and collection relations
+        // collect fields that need reflection helpers: ManyToOne (single id) and
+        // collection relations
         List<FieldInfo> collectionFields = fields.stream()
-            .filter(f -> !f.isIgnored())
-            .filter(f -> f.isOneToMany() || f.isManyToMany())
-            .toList();
+                .filter(f -> !f.isIgnored())
+                .filter(f -> f.isOneToMany() || f.isManyToMany())
+                .toList();
 
         List<FieldInfo> manyToOneFields = fields.stream()
-            .filter(f -> !f.isIgnored())
-            .filter(f -> f.isManyToOne() || f.isOneToOne())
-            .filter(f -> cacheInfo.getRelatedEntities().stream().anyMatch(re -> isSameEntity(f, re)))
-            .toList();
+                .filter(f -> !f.isIgnored())
+                .filter(f -> f.isManyToOne() || f.isOneToOne())
+                .filter(f -> cacheInfo.getRelatedEntities().stream().anyMatch(re -> isSameEntity(f, re)))
+                .toList();
 
-        // simple fields (no relation, not id) — generate reflection helpers so DTO generation works even without getters
+        // simple fields (no relation, not id) — generate reflection helpers so DTO
+        // generation works even without getters
         List<FieldInfo> simpleFields = fields.stream()
-            .filter(f -> !f.isIgnored())
-            .filter(f -> !f.isOneToMany() && !f.isManyToMany() && !f.isManyToOne() && !f.isOneToOne())
-            .filter(f -> !f.getName().equals(cacheInfo.getIdName()))
-            .toList();
+                .filter(f -> !f.isIgnored())
+                .filter(f -> !f.isOneToMany() && !f.isManyToMany() && !f.isManyToOne() && !f.isOneToOne())
+                .filter(f -> !f.getName().equals(cacheInfo.getIdName()))
+                .toList();
 
         // Only skip generating reflection helpers when there are absolutely no
         // fields that require helper generation (no collections, no many-to-one,
         // and no simple fields). Previously simple fields were neglected when
         // there were no relations which caused calls to extractField_* to be
         // emitted without corresponding helper methods.
-        if (collectionFields.isEmpty() && manyToOneFields.isEmpty() && simpleFields.isEmpty()) return "";
+        if (collectionFields.isEmpty() && manyToOneFields.isEmpty() && simpleFields.isEmpty())
+            return "";
 
         String entityName = cacheInfo.getEntityName();
         String var = Generator.decapitalizeFirst(entityName);
@@ -226,14 +234,15 @@ public class DtoGenerator {
         String idType = cacheInfo.getIdType();
         sb.append("    private static final java.lang.reflect.Field FIELD_").append(idUp).append(";\n");
 
-        // declare cached Field variables for simple fields so we can access them via reflection if getters are absent
-            for (FieldInfo f : simpleFields) {
-                String fname = f.getName();
-                String up = fname.toUpperCase();
-                sb.append("    private static final java.lang.reflect.Field FIELD_").append(up).append(";\n");
-            }
+        // declare cached Field variables for simple fields so we can access them via
+        // reflection if getters are absent
+        for (FieldInfo f : simpleFields) {
+            String fname = f.getName();
+            String up = fname.toUpperCase();
+            sb.append("    private static final java.lang.reflect.Field FIELD_").append(up).append(";\n");
+        }
 
-            // simple field extractors are generated later with primitive-safe defaults
+        // simple field extractors are generated later with primitive-safe defaults
         for (FieldInfo f : collectionFields) {
             String fname = f.getName();
             String up = fname.toUpperCase();
@@ -253,14 +262,16 @@ public class DtoGenerator {
         sb.append("\n    static {\n");
         sb.append("        try {\n");
         // initialize id field cache
-        sb.append("            FIELD_").append(idUp).append(" = ").append(entityName).append(".class.getDeclaredField(\"").append(idName).append("\");\n");
+        sb.append("            FIELD_").append(idUp).append(" = ").append(entityName)
+                .append(".class.getDeclaredField(\"").append(idName).append("\");\n");
         sb.append("            FIELD_").append(idUp).append(".setAccessible(true);\n");
 
         // initialize simple field cache
         for (FieldInfo f : simpleFields) {
             String fname = f.getName();
             String up = fname.toUpperCase();
-            sb.append("            FIELD_").append(up).append(" = ").append(entityName).append(".class.getDeclaredField(\"").append(fname).append("\");\n");
+            sb.append("            FIELD_").append(up).append(" = ").append(entityName)
+                    .append(".class.getDeclaredField(\"").append(fname).append("\");\n");
             sb.append("            FIELD_").append(up).append(".setAccessible(true);\n");
         }
 
@@ -272,13 +283,15 @@ public class DtoGenerator {
                     .filter(re -> isSameEntity(f, re))
                     .findFirst().orElse(null);
 
-            sb.append("            FIELD_").append(up).append(" = ").append(entityName).append(".class.getDeclaredField(\"").append(fname).append("\");\n");
+            sb.append("            FIELD_").append(up).append(" = ").append(entityName)
+                    .append(".class.getDeclaredField(\"").append(fname).append("\");\n");
             sb.append("            FIELD_").append(up).append(".setAccessible(true);\n");
 
             if (matched != null) {
                 String elemSimple = Generator.removePath(matched.getEntityPath());
                 String idMethod = "get" + Generator.capitalizeFirst(matched.getEntityIdName());
-                sb.append("            METHOD_GETID_").append(up).append(" = ").append(elemSimple).append(".class.getMethod(\"").append(idMethod).append("\");\n");
+                sb.append("            METHOD_GETID_").append(up).append(" = ").append(elemSimple)
+                        .append(".class.getMethod(\"").append(idMethod).append("\");\n");
             } else {
                 sb.append("            METHOD_GETID_").append(up).append(" = Object.class.getMethod(\"toString\");\n");
             }
@@ -292,13 +305,15 @@ public class DtoGenerator {
                     .filter(re -> isSameEntity(f, re))
                     .findFirst().orElse(null);
 
-            sb.append("            FIELD_").append(up).append(" = ").append(entityName).append(".class.getDeclaredField(\"").append(fname).append("\");\n");
+            sb.append("            FIELD_").append(up).append(" = ").append(entityName)
+                    .append(".class.getDeclaredField(\"").append(fname).append("\");\n");
             sb.append("            FIELD_").append(up).append(".setAccessible(true);\n");
 
             if (matched != null) {
                 String elemSimple = Generator.removePath(matched.getEntityPath());
                 String idMethod = "get" + Generator.capitalizeFirst(matched.getEntityIdName());
-                sb.append("            METHOD_GETID_").append(up).append(" = ").append(elemSimple).append(".class.getMethod(\"").append(idMethod).append("\");\n");
+                sb.append("            METHOD_GETID_").append(up).append(" = ").append(elemSimple)
+                        .append(".class.getMethod(\"").append(idMethod).append("\");\n");
             } else {
                 sb.append("            METHOD_GETID_").append(up).append(" = Object.class.getMethod(\"toString\");\n");
             }
@@ -311,7 +326,7 @@ public class DtoGenerator {
 
         // helper to extract entity id (uses cached FIELD_<ID>)
         sb.append("    private static ").append(idType).append(" extractId_").append(idUp)
-            .append("(").append(entityName).append(" ").append(var).append(") {\n");
+                .append("(").append(entityName).append(" ").append(var).append(") {\n");
         sb.append("        try {\n");
         sb.append("            Object val = FIELD_").append(idUp).append(".get(").append(var).append(");\n");
         sb.append("            return val == null ? null : (").append(idType).append(") val;\n");
@@ -327,12 +342,15 @@ public class DtoGenerator {
             RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
                     .filter(re -> isSameEntity(f, re))
                     .findFirst().orElse(null);
-                String elemIdType = matched != null ? Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType()) : "java.lang.Object";
+            String elemIdType = matched != null
+                    ? Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType())
+                    : "java.lang.Object";
 
-                sb.append("    private static java.util.List<").append(elemIdType).append("> extractIds_").append(up)
+            sb.append("    private static java.util.List<").append(elemIdType).append("> extractIds_").append(up)
                     .append("(").append(entityName).append(" ").append(var).append(") {\n");
             sb.append("        try {\n");
-            sb.append("            if (!jakarta.persistence.Persistence.getPersistenceUtil().isLoaded(").append(var).append(", \"").append(fname).append("\")) {\n");
+            sb.append("            if (!jakarta.persistence.Persistence.getPersistenceUtil().isLoaded(").append(var)
+                    .append(", \"").append(fname).append("\")) {\n");
             sb.append("                return java.util.List.of();\n");
             sb.append("            }\n");
             sb.append("            Object val = FIELD_").append(up).append(".get(").append(var).append(");\n");
@@ -362,21 +380,22 @@ public class DtoGenerator {
             RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
                     .filter(re -> isSameEntity(f, re))
                     .findFirst().orElse(null);
-                String elemIdType = matched != null ? Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType()) : "java.lang.Object";
+            String elemIdType = matched != null
+                    ? Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType())
+                    : "java.lang.Object";
 
-                sb.append("    private static ").append(elemIdType).append(" extractId_").append(up)
+            sb.append("    private static ").append(elemIdType).append(" extractId_").append(up)
                     .append("(").append(entityName).append(" ").append(var).append(") {\n");
             sb.append("        try {\n");
             // Prefer an entity-level id getter like getUserId() if present
             sb.append("            try {\n");
-            sb.append("                java.lang.reflect.Method directGetter = ").append(entityName).append(".class.getMethod(\"get").append(Generator.capitalizeFirst(fname)).append("Id\");\n");
+            sb.append("                java.lang.reflect.Method directGetter = ").append(entityName)
+                    .append(".class.getMethod(\"get").append(Generator.capitalizeFirst(fname)).append("Id\");\n");
             sb.append("                Object directVal = directGetter.invoke(").append(var).append(");\n");
-            sb.append("                return directVal == null ? null : (").append(elemIdType).append(") directVal;\n");
+            sb.append("                return directVal == null ? null : (").append(elemIdType)
+                    .append(") directVal;\n");
             sb.append("            } catch (Exception ignored) {\n");
             sb.append("                // fall back to field/method based extraction\n");
-            sb.append("            }\n");
-            sb.append("            if (!jakarta.persistence.Persistence.getPersistenceUtil().isLoaded(").append(var).append(", \"").append(fname).append("\")) {\n");
-            sb.append("                return null;\n");
             sb.append("            }\n");
             sb.append("            Object rel = FIELD_").append(up).append(".get(").append(var).append(");\n");
             sb.append("            if (rel == null) return null;\n");
@@ -398,8 +417,10 @@ public class DtoGenerator {
             String up = fname.toUpperCase();
             String dtoFieldType = Generator.denormalizeType(f.getType(), f.getOriginalType());
 
-            // determine whether the DTO field is a primitive type so we can emit safe defaults
-            boolean isPrimitive = dtoFieldType.equals("int") || dtoFieldType.equals("long") || dtoFieldType.equals("float")
+            // determine whether the DTO field is a primitive type so we can emit safe
+            // defaults
+            boolean isPrimitive = dtoFieldType.equals("int") || dtoFieldType.equals("long")
+                    || dtoFieldType.equals("float")
                     || dtoFieldType.equals("double") || dtoFieldType.equals("short") || dtoFieldType.equals("byte")
                     || dtoFieldType.equals("boolean") || dtoFieldType.equals("char");
 
@@ -461,10 +482,11 @@ public class DtoGenerator {
             }
 
             sb.append("    private static ").append(dtoFieldType).append(" extractField_").append(up)
-                .append("(").append(entityName).append(" ").append(var).append(") {\n");
+                    .append("(").append(entityName).append(" ").append(var).append(") {\n");
             sb.append("        try {\n");
             sb.append("            try {\n");
-            sb.append("                java.lang.reflect.Method getter = ").append(entityName).append(".class.getMethod(\"get").append(Generator.capitalizeFirst(fname)).append("\");\n");
+            sb.append("                java.lang.reflect.Method getter = ").append(entityName)
+                    .append(".class.getMethod(\"get").append(Generator.capitalizeFirst(fname)).append("\");\n");
             sb.append("                Object val = getter.invoke(").append(var).append(");\n");
             sb.append("                ").append(getterReturn).append("\n");
             sb.append("            } catch (Exception ignored) {\n");
@@ -489,14 +511,16 @@ public class DtoGenerator {
         // no-arg
         sb.append("    public ").append(cacheInfo.getDtoClassName()).append("() { }\n\n");
 
-        // build parameter list in same order as fromEntity (id first, then entity fields excluding id)
+        // build parameter list in same order as fromEntity (id first, then entity
+        // fields excluding id)
         StringBuilder params = new StringBuilder();
         List<FieldInfo> fields = cacheInfo.getEntityFields();
         // first param: id
         params.append(cacheInfo.getIdType()).append(" ").append(cacheInfo.getIdName());
 
         for (FieldInfo fieldInfo : fields) {
-            if (fieldInfo.getName().equals(cacheInfo.getIdName()) || fieldInfo.isIgnored()) continue;
+            if (fieldInfo.getName().equals(cacheInfo.getIdName()) || fieldInfo.isIgnored())
+                continue;
 
             RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
                     .filter(re -> isSameEntity(fieldInfo, re))
@@ -505,13 +529,16 @@ public class DtoGenerator {
 
             if (matched != null && (fieldInfo.isManyToOne() || fieldInfo.isOneToOne())) {
                 String fkFieldName = matched.getCacheEntityIdName();
-                String fkFieldType = Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType());
+                String fkFieldType = Generator.denormalizeType(matched.getEntityIdType(),
+                        matched.getEntityIdOriginalType());
                 params.append(", ").append(fkFieldType).append(" ").append(fkFieldName);
 
-            } else if (matched != null && (fieldInfo.isOneToMany() || fieldInfo.isManyToMany())){
-                String collectionType = fieldInfo.getCollectionPath().split("\\.")[fieldInfo.getCollectionPath().split("\\.").length -1];
-                String fkFieldNames = matched.getCacheEntityIdName()+"s";
-                String fkFieldType = collectionType + "<" + Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType()) + ">";
+            } else if (matched != null && (fieldInfo.isOneToMany() || fieldInfo.isManyToMany())) {
+                String collectionType = fieldInfo.getCollectionPath()
+                        .split("\\.")[fieldInfo.getCollectionPath().split("\\.").length - 1];
+                String fkFieldNames = matched.getCacheEntityIdName() + "s";
+                String fkFieldType = collectionType + "<"
+                        + Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType()) + ">";
                 params.append(", ").append(fkFieldType).append(" ").append(fkFieldNames);
 
             } else {
@@ -521,14 +548,17 @@ public class DtoGenerator {
         }
 
         // all-args constructor signature
-        sb.append("    public ").append(cacheInfo.getDtoClassName()).append("(").append(params.toString()).append(") {\n");
+        sb.append("    public ").append(cacheInfo.getDtoClassName()).append("(").append(params.toString())
+                .append(") {\n");
 
         // assignments
         // first assignment: id
-        sb.append("        this.").append(cacheInfo.getIdName()).append(" = ").append(cacheInfo.getIdName()).append(";\n");
+        sb.append("        this.").append(cacheInfo.getIdName()).append(" = ").append(cacheInfo.getIdName())
+                .append(";\n");
 
         for (FieldInfo fieldInfo : fields) {
-            if (fieldInfo.getName().equals(cacheInfo.getIdName()) || fieldInfo.isIgnored()) continue;
+            if (fieldInfo.getName().equals(cacheInfo.getIdName()) || fieldInfo.isIgnored())
+                continue;
 
             RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
                     .filter(re -> isSameEntity(fieldInfo, re))
@@ -538,13 +568,12 @@ public class DtoGenerator {
             if (matched != null && (fieldInfo.isManyToOne() || fieldInfo.isOneToOne())) {
                 String fkFieldName = matched.getCacheEntityIdName();
                 sb.append("        this.").append(fkFieldName).append(" = ").append(fkFieldName).append(";\n");
-            }
-            else if(matched != null && (fieldInfo.isOneToMany() || fieldInfo.isManyToMany())){
-                String fkFieldNames = matched.getCacheEntityIdName()+"s";
+            } else if (matched != null && (fieldInfo.isOneToMany() || fieldInfo.isManyToMany())) {
+                String fkFieldNames = matched.getCacheEntityIdName() + "s";
                 sb.append("        this.").append(fkFieldNames).append(" = ").append(fkFieldNames).append(";\n");
-            }
-            else {
-                sb.append("        this.").append(fieldInfo.getName()).append(" = ").append(fieldInfo.getName()).append(";\n");
+            } else {
+                sb.append("        this.").append(fieldInfo.getName()).append(" = ").append(fieldInfo.getName())
+                        .append(";\n");
             }
         }
 
@@ -569,7 +598,6 @@ public class DtoGenerator {
         return sb.toString();
     }
 
-
     // ==========================================
     // DTO Fields
     // ==========================================
@@ -578,14 +606,15 @@ public class DtoGenerator {
 
         fields.append("    @CacheId\n");
         fields.append("    private ")
-            .append(cacheInfo.getIdType())
+                .append(cacheInfo.getIdType())
                 .append(" ")
                 .append(cacheInfo.getIdName())
                 .append(";\n");
 
         for (FieldInfo fieldInfo : cacheInfo.getEntityFields()) {
 
-            if (fieldInfo.getName().equals(cacheInfo.getIdName()) || fieldInfo.isIgnored()) continue;
+            if (fieldInfo.getName().equals(cacheInfo.getIdName()) || fieldInfo.isIgnored())
+                continue;
 
             // ManyToOne / OneToOne
             RelatedEntity matched = cacheInfo.getRelatedEntities().stream()
@@ -595,7 +624,8 @@ public class DtoGenerator {
 
             if (matched != null && (fieldInfo.isManyToOne() || fieldInfo.isOneToOne())) {
                 String fkFieldName = matched.getCacheEntityIdName();
-                String fkFieldType = Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType());
+                String fkFieldType = Generator.denormalizeType(matched.getEntityIdType(),
+                        matched.getEntityIdOriginalType());
 
                 if (matched.getTableName() != null) {
                     fields.append("    @TableName(\"").append(matched.getTableName()).append("\")\n");
@@ -608,31 +638,31 @@ public class DtoGenerator {
                 }
 
                 fields.append("    private ")
-                    .append(fkFieldType)
+                        .append(fkFieldType)
                         .append(" ")
                         .append(fkFieldName)
                         .append(";\n");
 
-            }
-            else if(matched != null && (fieldInfo.isOneToMany() || fieldInfo.isManyToMany())){
-                String collectionType = fieldInfo.getCollectionPath().split("\\.")[fieldInfo.getCollectionPath().split("\\.").length -1];
-                String fkFieldNames = matched.getCacheEntityIdName()+"s";
-                String fkFieldType = collectionType + "<" + Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType()) + ">";
+            } else if (matched != null && (fieldInfo.isOneToMany() || fieldInfo.isManyToMany())) {
+                String collectionType = fieldInfo.getCollectionPath()
+                        .split("\\.")[fieldInfo.getCollectionPath().split("\\.").length - 1];
+                String fkFieldNames = matched.getCacheEntityIdName() + "s";
+                String fkFieldType = collectionType + "<"
+                        + Generator.denormalizeType(matched.getEntityIdType(), matched.getEntityIdOriginalType()) + ">";
 
                 if (matched.getTableName() != null) {
                     fields.append("    @TableName(\"").append(matched.getTableName()).append("\")\n");
                 }
                 fields.append("    private ")
-                    .append(fkFieldType)
+                        .append(fkFieldType)
                         .append(" ")
                         .append(fkFieldNames)
                         .append(";\n");
 
-            }
-            else {
+            } else {
                 String dtoFieldType = Generator.denormalizeType(fieldInfo.getType(), fieldInfo.getOriginalType());
                 fields.append("    private ")
-                    .append(dtoFieldType)
+                        .append(dtoFieldType)
                         .append(" ")
                         .append(fieldInfo.getName())
                         .append(";\n");
@@ -652,11 +682,11 @@ public class DtoGenerator {
         String idName = cacheInfo.getIdName();
 
         sb.append("    public static ").append(cacheInfo.getDtoClassName())
-            .append(" fromEntity(")
-            .append(cacheInfo.getEntityName())
-            .append(" ")
-            .append(var)
-            .append(") {\n");
+                .append(" fromEntity(")
+                .append(cacheInfo.getEntityName())
+                .append(" ")
+                .append(var)
+                .append(") {\n");
 
         sb.append("        return new ").append(cacheInfo.getDtoClassName()).append("(\n");
         String idUp = idName.toUpperCase();
@@ -665,14 +695,16 @@ public class DtoGenerator {
 
         for (FieldInfo field : cacheInfo.getEntityFields()) {
 
-            if (field.getName().equals(idName) || field.isIgnored()) continue;
+            if (field.getName().equals(idName) || field.isIgnored())
+                continue;
 
             RelatedEntity match = cacheInfo.getRelatedEntities().stream()
                     .filter(re -> isSameEntity(field, re))
                     .findFirst().orElse(null);
 
             if (match != null) {
-                // ManyToOne / OneToOne -> use reflection helper to extract related id (handles missing getters)
+                // ManyToOne / OneToOne -> use reflection helper to extract related id (handles
+                // missing getters)
                 if (field.isManyToOne() || field.isOneToOne()) {
                     String fname = field.getName();
                     String up = fname.toUpperCase();
@@ -691,11 +723,12 @@ public class DtoGenerator {
                 }
             }
 
-                // Use reflection-safe extractor so DTO generation works even when entity getter is absent
-                String up = field.getName().toUpperCase();
-                sb.append("                ")
-                        .append("extractField_").append(up).append("(").append(var).append(")")
-                        .append(",\n");
+            // Use reflection-safe extractor so DTO generation works even when entity getter
+            // is absent
+            String up = field.getName().toUpperCase();
+            sb.append("                ")
+                    .append("extractField_").append(up).append("(").append(var).append(")")
+                    .append(",\n");
         }
 
         sb.setLength(sb.length() - 2);
@@ -718,22 +751,23 @@ public class DtoGenerator {
         List<FieldInfo> fields = cacheInfo.getEntityFields();
         boolean first = true;
         for (FieldInfo field : fields) {
-            
+
             if (field.isManyToOne() || field.isOneToOne()) {
                 if (!first) {
-                sb.append(", ");
+                    sb.append(", ");
                 } else {
                     first = false;
                 }
                 sb.append(Generator.removePath(field.getType())).append(" ").append(field.getName());
             }
-            if(field.isOneToMany() || field.isManyToMany()){
+            if (field.isOneToMany() || field.isManyToMany()) {
                 if (!first) {
-                sb.append(", ");
+                    sb.append(", ");
                 } else {
                     first = false;
                 }
-                String colletionType = field.getCollectionPath().split("\\.")[field.getCollectionPath().split("\\.").length -1];
+                String colletionType = field.getCollectionPath()
+                        .split("\\.")[field.getCollectionPath().split("\\.").length - 1];
                 sb.append(colletionType).append("<");
                 sb.append(Generator.removePath(field.getType())).append(">").append(" ").append(field.getName());
             }
@@ -758,7 +792,8 @@ public class DtoGenerator {
         }
 
         // remove trailing comma and newline
-        if (sb.length() >= 2) sb.setLength(sb.length() - 2);
+        if (sb.length() >= 2)
+            sb.setLength(sb.length() - 2);
         sb.append("\n        );\n");
         sb.append("    }\n");
 

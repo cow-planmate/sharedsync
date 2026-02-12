@@ -29,12 +29,14 @@ import com.sharedsync.shared.annotation.ParentId;
 import com.sharedsync.shared.annotation.TableName;
 import com.sharedsync.shared.dto.CacheDto;
 import com.sharedsync.shared.history.HistoryAction;
+import com.sharedsync.shared.storage.PresenceStorage;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Root;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 완전 자동화된 캐시 리포지토리
@@ -44,6 +46,7 @@ import jakarta.persistence.criteria.Root;
  * @param <ID>  ID 타입
  * @param <DTO> DTO 타입
  */
+@Slf4j
 public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> implements CacheRepository<T, ID, DTO> {
 
     @Autowired
@@ -156,6 +159,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     @Override
     public Optional<T> findById(ID id) {
+        if (id != null)
+            waitForLoading(id);
         DTO dto = getCacheStore().hashGet(getRedisKey(id), String.valueOf(id));
         if (dto == null) {
             return Optional.empty();
@@ -981,6 +986,9 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             throw new UnsupportedOperationException("ParentId 필드가 없습니다.");
         }
 
+        // Loading 상태면 대기 (부모 ID 기준)
+        waitForLoading(parentId);
+
         String hashKey = getRedisKey(null);
         Set<String> allChildIds = new java.util.HashSet<>();
 
@@ -1397,6 +1405,44 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         return entityClass.getSimpleName();
     }
 
+    @Override
+    public boolean isLoading(Object id) {
+        if (id == null)
+            return false;
+        try {
+            PresenceStorage presenceStorage = applicationContext.getBean(PresenceStorage.class);
+            return presenceStorage.isLoading(id.toString());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void waitForLoading(Object id) {
+        if (id == null)
+            return;
+
+        try {
+            PresenceStorage presenceStorage = applicationContext.getBean(PresenceStorage.class);
+            // 최대 5초 대기 (500ms * 10회)
+            for (int i = 0; i < 10; i++) {
+                if (!presenceStorage.isLoading(id.toString())) {
+                    return;
+                }
+                if (i % 2 == 0) {
+                    log.debug("[AutoCacheRepository] Waiting for loading... id={}", id);
+                }
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+    }
+
     private Field findFieldInHierarchy(Class<?> clazz, String fieldName) {
         Class<?> current = clazz;
         while (current != null && current != Object.class) {
@@ -1717,6 +1763,20 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             return Collections.emptyList();
         }
 
+        // CRITICAL SAFEGUARD: If cache is empty but DB has data, DO NOT WIPE DB.
+        // This prevents race conditions where an empty cache (due to load
+        // failure/delay) causes data loss.
+        if (cachedPersistentIds.isEmpty()) {
+            log.error(
+                    "[CacheRepository] [TRACE-F5] CRITICAL: Sync found EMPTY CACHE for parentId={} but DB has {} entities. Aborting delete to prevent wipeout.",
+                    parentId, persistedEntities.size());
+            return refreshedDtos;
+        }
+
+        log.info(
+                "[CacheRepository] [TRACE-F5] ParentId={}: Cache has {} persistent items, DB has {} items. Proceeding with sync.",
+                parentId, cachedPersistentIds.size(), persistedEntities.size());
+
         List<T> entitiesToDelete = persistedEntities.stream()
                 .filter(entity -> {
                     ID entityId = extractEntityId(entity);
@@ -1751,6 +1811,19 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
         if (!typeMatched)
             return;
+
+        // 안전 장치: 캐시가 완전히 비어있을 경우 (persistentIds가 비어있음)
+        // 혹시 모를 레이스 컨디션으로 인한 데이터 전량 삭제를 방지하기 위해 로그를 남기고
+        // 상위 호출자(CacheSyncService)에서 이미 hasTracker 체크를 하도록 함.
+        // 안전 장치: 캐시가 완전히 비어있을 경우 (persistentIds가 비어있음)
+        // 레이스 컨디션으로 인해 캐시가 비워진 상태에서 DB 동기화가 일어나면 데이터가 전량 삭제됨.
+        // 이를 방지하기 위해 캐시가 비어있다면 삭제를 아예 수행하지 않도록 방어 로직 적용.
+        if (persistentIds == null || persistentIds.isEmpty()) {
+            log.error(
+                    "[CacheRepository] CRITICAL: Attempt to delete ALL entities for parentId={} from DB. Aborting deletion to prevent data loss.",
+                    parentId);
+            return;
+        }
 
         ID typedParentId = (ID) parentId;
         List<T> persistedEntities = loadEntitiesByParentId(typedParentId);
@@ -2116,4 +2189,56 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
     }
 
+    @Override
+    public boolean isSyncing(Object id) {
+        if (id == null)
+            return false;
+        // sharedsync 인프라의 SYNC_LOCK 키 사용 (RedisPresenceStorage.SYNC_LOCK 참조)
+        String syncLockKey = "PRESENCE:SYNC_LOCK:" + id.toString();
+
+        try {
+            // RedisTemplate을 통해 직접 키 존재 여부 확인
+            // @AutoRedisTemplate 또는 일반 redisTemplate 빈을 사용
+            RedisTemplate<String, Object> redis = (RedisTemplate<String, Object>) applicationContext
+                    .getBean("redisTemplate");
+            return Boolean.TRUE.equals(redis.hasKey(syncLockKey));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 문자열 ID를 실제 ID 타입으로 변환
+     */
+    @SuppressWarnings("unchecked")
+    public ID convertStringToId(String idStr) {
+        if (idStr == null) {
+            return null;
+        }
+        try {
+            if (idClass.equals(String.class)) {
+                return (ID) idStr;
+            } else if (idClass.equals(java.util.UUID.class)) {
+                return (ID) java.util.UUID.fromString(idStr);
+            } else if (idClass.equals(Long.class) || idClass.equals(long.class)) {
+                return (ID) Long.valueOf(idStr);
+            } else if (idClass.equals(Integer.class) || idClass.equals(int.class)) {
+                return (ID) Integer.valueOf(idStr);
+            }
+        } catch (Exception e) {
+            throw new IllegalArgumentException("ID 변환 실패: " + idStr + " to " + idClass.getSimpleName());
+        }
+        throw new IllegalArgumentException("지원하지 않는 ID 타입입니다: " + idClass.getSimpleName());
+    }
+
+    /**
+     * 특정 리포지토리가 이 리포지토리의 부모 엔티티를 관리하는지 확인
+     */
+    public boolean hasParentRepository(AutoCacheRepository<?, ?, ?> parentRepo) {
+        if (parentRepo == null) {
+            return false;
+        }
+        Class<?> parentEntityClass = parentRepo.getEntityClass();
+        return parentEntityClassMap.containsValue(parentEntityClass);
+    }
 }

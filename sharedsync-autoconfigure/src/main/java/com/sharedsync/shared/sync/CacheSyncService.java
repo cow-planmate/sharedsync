@@ -9,15 +9,21 @@ import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.sharedsync.shared.repository.AutoCacheRepository;
+import com.sharedsync.shared.storage.PresenceStorage;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class CacheSyncService {
     private final List<AutoCacheRepository<?, ?, ?>> cacheRepositories;
+    private final PresenceStorage presenceStorage;
 
     /**
      * 캐시 삭제 예약 항목 (Phase 2에서 일괄 삭제용)
@@ -34,26 +40,71 @@ public class CacheSyncService {
 
     @Transactional
     public void syncToDatabase(String rootId) {
+        log.info("[CacheSync] [TRACE-F5] Request received for rootId={}", rootId);
+
+        if (presenceStorage.hasTracker(rootId)) {
+            log.info("[CacheSync] [TRACE-F5] Sync aborted for rootId={}: Active tracker detected. (User returned)",
+                    rootId);
+            return;
+        }
+
+        // 2. 캐시 로딩(Initialize) 중이면 중단 (불완전 캐시 상태)
+        // CacheInitializer에서 로딩 시작 시 설정하고 완료 시 해제함
+        if (presenceStorage.isLoading(rootId)) {
+            log.warn("[CacheSync] [TRACE-F5] Sync aborted for rootId={}: Cache initialization in progress.", rootId);
+            return;
+        }
+
         AutoCacheRepository<?, ?, ?> rootRepository = cacheRepositories.stream()
                 .filter(repo -> !repo.isParentIdFieldPresent())
                 .findFirst()
-                .orElseThrow(() -> new IllegalStateException("루트 DTO를 가진 AutoCacheRepository를 찾을 수 없습니다."));
+                .orElse(null);
 
-        // Phase 1: DB 동기화 수행 (캐시는 그대로 유지, 삭제 대상만 수집)
+        if (rootRepository == null) {
+            log.warn("[CacheSync] No root repository found for sync");
+            return;
+        }
+
+        Object rootIdTyped = rootRepository.convertStringToId(rootId);
         List<CacheDeletionEntry> deletionQueue = new ArrayList<>();
-        syncRecursively(rootRepository, rootId, deletionQueue);
 
-        // Phase 2: 캐시 일괄 삭제
-        // DB 동기화가 완전히 끝난 후에 캐시를 삭제하므로,
-        // 조회 시 "캐시 전부 있음" 또는 "캐시 전부 없음(DB fallback)" 상태만 노출됩니다.
-        for (CacheDeletionEntry entry : deletionQueue) {
-            entry.repository.deleteCacheByIdUnchecked(entry.id);
+        syncRecursively(rootRepository, rootIdTyped, deletionQueue, rootId);
+
+        // Phase 2: 캐시 일괄 삭제 (트랜잭션 커밋 후 실행)
+        // DB 트랜잭션이 아직 활성 상태라면 afterCommit 동기화 등록
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    log.info("[CacheSync] Transaction committed. Starting batch cache deletion for rootId={}", rootId);
+                    for (CacheDeletionEntry entry : deletionQueue) {
+                        try {
+                            entry.repository.deleteCacheByIdUnchecked(entry.id);
+                        } catch (Exception e) {
+                            log.error("[CacheSync] Failed to delete cache for id={} in repo={}", entry.id,
+                                    entry.repository.getClass().getSimpleName(), e);
+                        }
+                    }
+                }
+            });
+        } else {
+            // 트랜잭션이 없는 경우 (거의 없겠지만) 즉시 삭제
+            log.warn("[CacheSync] No active transaction. Deleting cache immediately for rootId={}", rootId);
+            for (CacheDeletionEntry entry : deletionQueue) {
+                entry.repository.deleteCacheByIdUnchecked(entry.id);
+            }
         }
     }
 
     private void syncRecursively(AutoCacheRepository<?, ?, ?> repository, Object id,
-            List<CacheDeletionEntry> deletionQueue) {
+            List<CacheDeletionEntry> deletionQueue, String rootId) {
         if (repository == null || id == null) {
+            return;
+        }
+
+        // 동기화 도중 유저가 접속하면 중단 (데이터 유실 방지 핵심 로직)
+        if (presenceStorage.hasTracker(rootId)) {
+            log.info("[CacheSync] Aborting recursive sync for rootId={} because user activity detected", rootId);
             return;
         }
 
@@ -62,9 +113,9 @@ public class CacheSyncService {
             repository.syncToDatabaseByDtoUnchecked(dto);
         }
 
+        // Phase 1: 자식 엔티티 동기화 (Leaf부터 상향식으로 진행됨)
         Map<AutoCacheRepository<?, ?, ?>, List<?>> childDtos = cacheRepositories.stream()
-                .filter(childRepo -> childRepo != repository)
-                .filter(childRepo -> childRepo.isParentEntityOf(repository.getEntityType()))
+                .filter(childRepo -> childRepo.hasParentRepository(repository))
                 .collect(Collectors.toMap(childRepo -> childRepo,
                         childRepo -> childRepo.findDtoListByParentIdUnchecked(id)));
 
@@ -92,7 +143,7 @@ public class CacheSyncService {
 
             childRepo.deleteEntitiesNotInCache(id, persistentIds);
 
-            persistentIds.forEach(childId -> syncRecursively(childRepo, childId, deletionQueue));
+            persistentIds.forEach(childId -> syncRecursively(childRepo, childId, deletionQueue, rootId));
         }
         // 캐시 삭제를 바로 하지 않고, 삭제 대상 큐에 추가 (Phase 2에서 일괄 삭제)
         deletionQueue.add(new CacheDeletionEntry(repository, id));

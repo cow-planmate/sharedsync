@@ -18,10 +18,10 @@ public class InMemoryPresenceStorage implements PresenceStorage {
 
     // rootId -> Map<userId//sessionId, index>
     private final Map<String, Map<String, String>> trackers = new ConcurrentHashMap<>();
-    
+
     // sessionId -> rootId
     private final Map<String, String> sessionToRoot = new ConcurrentHashMap<>();
-    
+
     // userId -> userInfo
     private final Map<String, Map<String, Object>> userInfos = new ConcurrentHashMap<>();
 
@@ -154,5 +154,21 @@ public class InMemoryPresenceStorage implements PresenceStorage {
     @Override
     public void releaseSyncLock(String rootId) {
         syncLocks.remove(rootId);
+    }
+
+    private final java.util.Set<String> loadingFlags = ConcurrentHashMap.newKeySet();
+
+    @Override
+    public void setIsLoading(String rootId, boolean isLoading) {
+        if (isLoading) {
+            loadingFlags.add(rootId);
+        } else {
+            loadingFlags.remove(rootId);
+        }
+    }
+
+    @Override
+    public boolean isLoading(String rootId) {
+        return loadingFlags.contains(rootId);
     }
 }

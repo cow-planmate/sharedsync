@@ -3,6 +3,9 @@ package com.sharedsync.shared.listener;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 import org.springframework.scheduling.annotation.Scheduled;
@@ -32,7 +35,7 @@ public class PresenceSessionManager {
 
     private final PresenceStorage presenceStorage;
     private final PresenceBroadcaster presenceBroadcaster;
-    private final UserProvider userProvider;        
+    private final UserProvider userProvider;
     private final CacheInitializer cacheInitializer;
     private final CacheSyncService cacheSyncService;
     private final HistoryService historyService;
@@ -43,39 +46,48 @@ public class PresenceSessionManager {
     // 현재 서버 인스턴스에서 관리 중인 세션 목록
     private final java.util.Set<String> localSessions = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
+    // 지연된 동기화 작업 관리용
+    private final Map<String, ScheduledFuture<?>> pendingSyncTasks = new java.util.concurrent.ConcurrentHashMap<>();
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+
     /**
      * 연결 시 (입장)
      */
     public void handleSubscribe(String rootId, String userId, String sessionId) {
         log.info("[PresenceManager] handleSubscribe: rootId={}, userId={}, sessionId={}", rootId, userId, sessionId);
-        
+
         if (!authProperties.isEnabled()) {
             userId = "ws-" + sessionId;
         }
 
         localSessions.add(sessionId);
 
-        if (!presenceStorage.hasTracker(rootId)) {
-            log.info("[PresenceManager] Initializing hierarchy for rootId={}", rootId);
-            cacheInitializer.initializeHierarchy(rootId);
-        }
+        // 지연 로직이 있다면 취소
+        boolean interceptedSync = cancelPendingSyncTask(rootId);
 
-        Map<String, Object> userInfo = presenceStorage.getUserInfoByUserId(userId);
-        if (userInfo == null || userInfo.isEmpty()) {
-            log.debug("[PresenceManager] UserInfo not found in cache for userId={}, fetching from provider", userId);
-            userInfo = userProvider.findUserInfoByUserId(userId);
-            if (userInfo != null && !userInfo.isEmpty()) {
-                presenceStorage.saveUserInfo(userId, userInfo);
-            }
-        }
+        // 만약 현재 동기화(DB Flush)가 진행 중이라면 잠시 대기
+        waitForSyncCompletion(rootId);
 
+        boolean isFirstUser = !presenceStorage.hasTracker(rootId);
+
+        // 트래커를 먼저 등록하여, 이후 실행될 수 있는 executeSyncWithLock이 hasTracker() 체크에서 건너뛰게 함
         presenceStorage.insertTracker(rootId, sessionId, userId, DEFAULT_INDEX);
         presenceStorage.mapSessionToRoot(sessionId, rootId, presenceProperties.getSessionTimeout());
         presenceStorage.addActiveSession(userId, sessionId);
-        
+
+        if (isFirstUser) {
+            if (interceptedSync) {
+                log.info(
+                        "[PresenceManager] Skipping initialization for rootId={} because pending sync was intercepted (Cache is fresh).",
+                        rootId);
+            } else {
+                log.info("[PresenceManager] First user in room {}. Initializing hierarchy.", rootId);
+                cacheInitializer.initializeHierarchy(rootId);
+            }
+        }
+
         final String finalUserId = userId;
         broadcastUpdate(rootId, ACTION_CREATE, userId);
-
 
         CompletableFuture.delayedExecutor(presenceProperties.getBroadcastDelay(), TimeUnit.MILLISECONDS).execute(() -> {
             try {
@@ -86,7 +98,6 @@ public class PresenceSessionManager {
             }
         });
     }
-
 
     /**
      * 하트비트 처리 (세션 만료 연장)
@@ -112,11 +123,12 @@ public class PresenceSessionManager {
                 List<String> removedEntries = presenceStorage.purgeZombies(rootId);
                 for (String entry : removedEntries) {
                     String[] parts = entry.split("//");
-                    if (parts.length < 2) continue;
+                    if (parts.length < 2)
+                        continue;
                     String userId = parts[0];
                     String sessionId = parts[1];
                     log.info("ZOMBIE DETECTED: Removing user {} from room {}", userId, rootId);
-                    
+
                     performDisconnect(rootId, userId, sessionId);
                 }
             } catch (Exception e) {
@@ -125,16 +137,87 @@ public class PresenceSessionManager {
         }
     }
 
+    private void waitForSyncCompletion(String rootId) {
+        int retryCount = 0;
+        int maxRetries = 10;
+        while (retryCount < maxRetries) {
+            // SYNC_LOCK이 걸려있는지 확인
+            if (!presenceStorage.acquireSyncLock(rootId)) {
+                log.info("[PresenceManager] Sync in progress for rootId={}. Waiting...", rootId);
+                try {
+                    Thread.sleep(500);
+                    retryCount++;
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            } else {
+                // 락을 획득했다는 것은 현재 동기화 중이 아니라는 뜻이므로 바로 해제
+                presenceStorage.releaseSyncLock(rootId);
+                break;
+            }
+        }
+    }
+
     private void syncToDatabaseIfLocked(String rootId) {
+        if (presenceProperties.getSyncDelay() > 0) {
+            log.info(
+                    "[PresenceManager] [TRACE-F5] No active users in room {}. Delaying sync for {} seconds. (Scheduled)",
+                    rootId,
+                    presenceProperties.getSyncDelay());
+
+            cancelPendingSyncTask(rootId); // 기존 작업이 있다면 취소
+
+            ScheduledFuture<?> future = scheduler.schedule(() -> {
+                try {
+                    log.info("[PresenceManager] [TRACE-F5] Executing scheduled sync for rootId={}", rootId);
+                    executeSyncWithLock(rootId);
+                } finally {
+                    pendingSyncTasks.remove(rootId);
+                }
+            }, presenceProperties.getSyncDelay(), TimeUnit.SECONDS);
+
+            pendingSyncTasks.put(rootId, future);
+        } else {
+            // 지연 설정이 없으면 즉시 실행
+            log.info("[PresenceManager] [TRACE-F5] No sync delay configured. Executing sync immediately for rootId={}",
+                    rootId);
+            executeSyncWithLock(rootId);
+        }
+    }
+
+    private void executeSyncWithLock(String rootId) {
         if (presenceStorage.acquireSyncLock(rootId)) {
             try {
+                // 실제 실행 시점에 여전히 유저가 없는지 다시 확인
                 if (!presenceStorage.hasTracker(rootId)) {
+                    log.info("[PresenceManager] Executing delayed sync for rootId={}", rootId);
                     cacheSyncService.syncToDatabase(rootId);
+                } else {
+                    log.info("[PresenceManager] Sync skipped for rootId={} (user re-connected)", rootId);
                 }
             } finally {
                 presenceStorage.releaseSyncLock(rootId);
             }
         }
+    }
+
+    private boolean cancelPendingSyncTask(String rootId) {
+        ScheduledFuture<?> task = pendingSyncTasks.remove(rootId);
+        if (task != null) {
+            if (!task.isDone()) {
+                log.info(
+                        "[PresenceManager] [TRACE-F5] Sync task CANCELLED for rootId={} due to user activity. (Success)",
+                        rootId);
+                task.cancel(false);
+                return true;
+            } else {
+                log.info("[PresenceManager] [TRACE-F5] Sync task found but already DONE for rootId={}", rootId);
+            }
+        } else {
+            log.debug("[PresenceManager] [TRACE-F5] No pending sync task found to cancel for rootId={}", rootId);
+        }
+        return false;
     }
 
     private void broadcastUpdate(String rootId, String action, String userId) {
@@ -145,13 +228,12 @@ public class PresenceSessionManager {
         java.util.List<Map<String, Object>> userList = buildUserListWithoutDuplicates(rootId);
 
         presenceBroadcaster.broadcast(
-            channel,
-            rootId,
-            action,
-            userId,
-            userInfo,
-            userList
-        );
+                channel,
+                rootId,
+                action,
+                userId,
+                userInfo,
+                userList);
     }
 
     private void sendToSession(String rootId, String sessionId, String action, String userId) {
@@ -165,15 +247,14 @@ public class PresenceSessionManager {
         java.util.List<Map<String, Object>> userList = buildUserListWithoutDuplicates(rootId);
 
         presenceBroadcaster.sendToSession(
-            channel,
-            rootId,
-            principalName,
-            sessionId,
-            action,
-            userId,
-            userInfo,
-            userList
-        );
+                channel,
+                rootId,
+                principalName,
+                sessionId,
+                action,
+                userId,
+                userInfo,
+                userList);
     }
 
     /**
@@ -187,7 +268,8 @@ public class PresenceSessionManager {
     private void performDisconnect(String rootId, String userId, String sessionId) {
         localSessions.remove(sessionId);
 
-        if (rootId == null || rootId.isBlank()) return;
+        if (rootId == null || rootId.isBlank())
+            return;
 
         if (!authProperties.isEnabled()) {
             userId = "ws-" + sessionId;
@@ -204,7 +286,8 @@ public class PresenceSessionManager {
             }
         }
 
-        if (userId == null) return;
+        if (userId == null)
+            return;
 
         presenceStorage.removeTracker(rootId, sessionId, userId);
         presenceStorage.removeActiveSession(userId, sessionId);
@@ -241,6 +324,17 @@ public class PresenceSessionManager {
      */
     @PreDestroy
     public void cleanup() {
+        log.info("Shutting down PresenceSessionManager scheduler...");
+        scheduler.shutdown();
+        try {
+            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                scheduler.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            scheduler.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+
         log.info("Cleaning up {} local presence sessions before shutdown...", localSessions.size());
         for (String sessionId : localSessions) {
             try {
@@ -250,5 +344,6 @@ public class PresenceSessionManager {
             }
         }
         localSessions.clear();
+        pendingSyncTasks.clear();
     }
 }

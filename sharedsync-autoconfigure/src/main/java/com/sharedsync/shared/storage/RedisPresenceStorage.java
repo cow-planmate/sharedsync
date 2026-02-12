@@ -65,8 +65,9 @@ public class RedisPresenceStorage implements PresenceStorage {
     @SuppressWarnings("unchecked")
     public Map<String, Object> getUserInfoByUserId(String userId) {
         Map<Object, Object> entries = redis.opsForHash().entries(USER_INFO + userId);
-        if (entries.isEmpty()) return null;
-        
+        if (entries.isEmpty())
+            return null;
+
         Map<String, Object> result = new java.util.HashMap<>();
         entries.forEach((k, v) -> result.put(k.toString(), v));
         return result;
@@ -126,7 +127,8 @@ public class RedisPresenceStorage implements PresenceStorage {
         return cleanAndGetActiveUserIds(rootId).removedUserIds();
     }
 
-    private record CleanupResult(List<String> activeUserIds, List<String> removedUserIds) {}
+    private record CleanupResult(List<String> activeUserIds, List<String> removedUserIds) {
+    }
 
     private CleanupResult cleanAndGetActiveUserIds(String rootId) {
         Map<Object, Object> entries = redis.opsForHash().entries(TRACKER + rootId);
@@ -142,7 +144,8 @@ public class RedisPresenceStorage implements PresenceStorage {
         for (Object k : entries.keySet()) {
             String key = k.toString();
             String[] parts = key.split("//");
-            if (parts.length < 2) continue;
+            if (parts.length < 2)
+                continue;
 
             trackerKeys.add(key);
             sessionRedisKeys.add(SESSION_TO_ROOT + parts[1]);
@@ -154,7 +157,8 @@ public class RedisPresenceStorage implements PresenceStorage {
             sessionValues.add(redis.opsForValue().get(sessionKey));
         }
 
-        log.debug("[RedisStorage] Checking session activity for rootId={}, sessionCount={}", rootId, sessionRedisKeys.size());
+        log.debug("[RedisStorage] Checking session activity for rootId={}, sessionCount={}", rootId,
+                sessionRedisKeys.size());
         List<String> activeUserIds = new ArrayList<>();
         List<String> removedUserIds = new ArrayList<>();
 
@@ -178,21 +182,26 @@ public class RedisPresenceStorage implements PresenceStorage {
 
     @Override
     public java.util.Set<String> getAllRoomIds() {
-        java.util.Set<String> roomIds = new java.util.HashSet<>();
-        // SCAN을 사용하여 성능 부하 최소화하며 Tracker 키 탐색
-        org.springframework.data.redis.core.Cursor<byte[]> cursor = redis.getConnectionFactory().getConnection()
-                .scan(org.springframework.data.redis.core.ScanOptions.scanOptions().match(TRACKER + "*").count(100).build());
-        
-        while (cursor.hasNext()) {
-            String key = new String(cursor.next());
-            roomIds.add(key.substring(TRACKER.length()));
-        }
-        return roomIds;
+        return redis.execute((org.springframework.data.redis.connection.RedisConnection connection) -> {
+            java.util.Set<String> roomIds = new java.util.HashSet<>();
+            try (org.springframework.data.redis.core.Cursor<byte[]> cursor = connection
+                    .scan(org.springframework.data.redis.core.ScanOptions.scanOptions().match(TRACKER + "*").count(100)
+                            .build())) {
+                while (cursor.hasNext()) {
+                    String key = new String(cursor.next());
+                    roomIds.add(key.substring(TRACKER.length()));
+                }
+            } catch (Exception e) {
+                log.error("Error scanning keys", e);
+            }
+            return roomIds;
+        });
     }
 
     @Override
     public boolean acquireSyncLock(String rootId) {
-        return Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(SYNC_LOCK + rootId, "locked", java.time.Duration.ofSeconds(30)));
+        return Boolean.TRUE.equals(
+                redis.opsForValue().setIfAbsent(SYNC_LOCK + rootId, "locked", java.time.Duration.ofSeconds(30)));
     }
 
     @Override
@@ -200,5 +209,20 @@ public class RedisPresenceStorage implements PresenceStorage {
         redis.delete(SYNC_LOCK + rootId);
     }
 
-}
+    @Override
+    public void setIsLoading(String rootId, boolean isLoading) {
+        String key = "CACHE:LOADING:" + rootId;
+        if (isLoading) {
+            redis.opsForValue().set(key, "TRUE", java.time.Duration.ofSeconds(60));
+        } else {
+            redis.delete(key);
+        }
+    }
 
+    @Override
+    public boolean isLoading(String rootId) {
+        String key = "CACHE:LOADING:" + rootId;
+        return Boolean.TRUE.equals(redis.hasKey(key));
+    }
+
+}
