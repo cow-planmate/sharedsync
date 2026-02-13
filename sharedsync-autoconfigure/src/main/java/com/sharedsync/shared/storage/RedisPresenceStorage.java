@@ -8,11 +8,9 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Component
-@RequiredArgsConstructor
 @Slf4j
 @ConditionalOnProperty(name = "sharedsync.cache.type", havingValue = "redis")
 public class RedisPresenceStorage implements PresenceStorage {
@@ -205,11 +203,6 @@ public class RedisPresenceStorage implements PresenceStorage {
     }
 
     @Override
-    public void releaseSyncLock(String rootId) {
-        redis.delete(SYNC_LOCK + rootId);
-    }
-
-    @Override
     public void setIsLoading(String rootId, boolean isLoading) {
         String key = "CACHE:LOADING:" + rootId;
         if (isLoading) {
@@ -223,6 +216,67 @@ public class RedisPresenceStorage implements PresenceStorage {
     public boolean isLoading(String rootId) {
         String key = "CACHE:LOADING:" + rootId;
         return Boolean.TRUE.equals(redis.hasKey(key));
+    }
+
+    @Override
+    public boolean isSyncing(String rootId) {
+        return Boolean.TRUE.equals(redis.hasKey(SYNC_LOCK + rootId));
+    }
+
+    private final org.springframework.data.redis.listener.RedisMessageListenerContainer redisMessageListenerContainer;
+
+    public RedisPresenceStorage(
+            @org.springframework.beans.factory.annotation.Qualifier("presenceRedis") RedisTemplate<String, Object> redis,
+            @org.springframework.beans.factory.annotation.Qualifier("sharedSyncRedisMessageListenerContainer") org.springframework.data.redis.listener.RedisMessageListenerContainer redisMessageListenerContainer) {
+        this.redis = redis;
+        this.redisMessageListenerContainer = redisMessageListenerContainer;
+    }
+
+    @Override
+    public void waitForSync(String rootId) {
+        if (!isSyncing(rootId)) {
+            return;
+        }
+
+        String channel = "PRESENCE:SYNC_COMPLETE:" + rootId;
+        java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+
+        org.springframework.data.redis.connection.MessageListener listener = (message, pattern) -> {
+            latch.countDown();
+        };
+
+        try {
+            redisMessageListenerContainer.addMessageListener(listener,
+                    new org.springframework.data.redis.listener.ChannelTopic(channel));
+
+            // Re-check locking status to avoid race condition (sync might have finished
+            // before subscription)
+            if (!isSyncing(rootId)) {
+                return;
+            }
+
+            // Wait for up to 5 seconds
+            try {
+                if (!latch.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                    log.warn("[RedisStorage] Timeout waiting for sync completion: rootId={}", rootId);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        } finally {
+            redisMessageListenerContainer.removeMessageListener(listener);
+        }
+    }
+
+    @Override
+    public void notifySyncComplete(String rootId) {
+        redis.convertAndSend("PRESENCE:SYNC_COMPLETE:" + rootId, "DONE");
+    }
+
+    @Override
+    public void releaseSyncLock(String rootId) {
+        redis.delete(SYNC_LOCK + rootId);
+        notifySyncComplete(rootId);
     }
 
 }

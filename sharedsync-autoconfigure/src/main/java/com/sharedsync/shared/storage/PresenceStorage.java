@@ -45,4 +45,19 @@ public interface PresenceStorage {
     void setIsLoading(String rootId, boolean isLoading);
 
     boolean isLoading(String rootId);
+
+    /**
+     * 특정 방(rootId)에 대해 현재 동기화(DB flush 등) 작업이 진행 중인지(Lock이 걸려있는지) 확인합니다.
+     */
+    boolean isSyncing(String rootId);
+
+    /**
+     * 특정 방(rootId)의 동기화가 완료될 때까지 대기합니다.
+     */
+    void waitForSync(String rootId);
+
+    /**
+     * 특정 방(rootId)의 동기화 완료 이벤트를 알립니다.
+     */
+    void notifySyncComplete(String rootId);
 }

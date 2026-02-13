@@ -151,11 +151,6 @@ public class InMemoryPresenceStorage implements PresenceStorage {
         return syncLocks.add(rootId);
     }
 
-    @Override
-    public void releaseSyncLock(String rootId) {
-        syncLocks.remove(rootId);
-    }
-
     private final java.util.Set<String> loadingFlags = ConcurrentHashMap.newKeySet();
 
     @Override
@@ -170,5 +165,55 @@ public class InMemoryPresenceStorage implements PresenceStorage {
     @Override
     public boolean isLoading(String rootId) {
         return loadingFlags.contains(rootId);
+    }
+
+    private final Map<String, java.util.concurrent.locks.Condition> syncConditions = new ConcurrentHashMap<>();
+    private final java.util.concurrent.locks.ReentrantLock lock = new java.util.concurrent.locks.ReentrantLock();
+
+    @Override
+    public boolean isSyncing(String rootId) {
+        return syncLocks.contains(rootId);
+    }
+
+    @Override
+    public void waitForSync(String rootId) {
+        lock.lock();
+        try {
+            while (isSyncing(rootId)) {
+                java.util.concurrent.locks.Condition condition = syncConditions.computeIfAbsent(rootId,
+                        k -> lock.newCondition());
+                try {
+                    if (!condition.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                        break; // timeout
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @Override
+    public void notifySyncComplete(String rootId) {
+        lock.lock();
+        try {
+            java.util.concurrent.locks.Condition condition = syncConditions.remove(rootId);
+            if (condition != null) {
+                condition.signalAll();
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @Override
+    public void releaseSyncLock(String rootId) {
+        boolean removed = syncLocks.remove(rootId);
+        if (removed) {
+            notifySyncComplete(rootId);
+        }
     }
 }

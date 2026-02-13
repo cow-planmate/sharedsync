@@ -72,7 +72,8 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
     }
 
     @Bean
-    public RedisTemplate<String, Integer> refreshRedisTemplate(@Qualifier("sharedSyncRedisConnectionFactory") RedisConnectionFactory connectionFactory) {
+    public RedisTemplate<String, Integer> refreshRedisTemplate(
+            @Qualifier("sharedSyncRedisConnectionFactory") RedisConnectionFactory connectionFactory) {
         RedisTemplate<String, Integer> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
         template.afterPropertiesSet();
@@ -84,8 +85,7 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
             @Value("${sharedsync.redis.host:${spring.data.redis.host:localhost}}") String host,
             @Value("${sharedsync.redis.replica-host:${spring.data.redis.replica-host:}}") String replicaHost,
             @Value("${sharedsync.redis.port:${spring.data.redis.port:6379}}") String portStr,
-            @Value("${sharedsync.redis.password:${spring.data.redis.password:}}") String password
-    ) {
+            @Value("${sharedsync.redis.password:${spring.data.redis.password:}}") String password) {
         LettuceClientConfiguration clientConfig = LettuceClientConfiguration.builder()
                 .readFrom(ReadFrom.REPLICA_PREFERRED)
                 .clientOptions(ClientOptions.builder()
@@ -106,14 +106,13 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
 
         // Replica 설정이 있는 경우 Static Master/Replica 구성 사용 (읽기 분산)
         if (replicaHost != null && !replicaHost.isEmpty()) {
-            RedisStaticMasterReplicaConfiguration staticConfig = 
-                    new RedisStaticMasterReplicaConfiguration(host, port);
+            RedisStaticMasterReplicaConfiguration staticConfig = new RedisStaticMasterReplicaConfiguration(host, port);
             staticConfig.addNode(replicaHost, port);
-            
+
             if (password != null && !password.isEmpty()) {
                 staticConfig.setPassword(RedisPassword.of(password));
             }
-            
+
             LettuceConnectionFactory factory = new LettuceConnectionFactory(staticConfig, clientConfig);
             factory.afterPropertiesSet();
             return factory;
@@ -124,7 +123,7 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
         if (password != null && !password.isEmpty()) {
             standaloneConfig.setPassword(RedisPassword.of(password));
         }
-        
+
         LettuceConnectionFactory factory = new LettuceConnectionFactory(standaloneConfig, clientConfig);
         factory.afterPropertiesSet();
         return factory;
@@ -139,8 +138,7 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
     public RedisConnectionFactory pubSubConnectionFactory(
             @Value("${spring.data.redis.host:localhost}") String host,
             @Value("${spring.data.redis.port:6379}") String portStr,
-            @Value("${spring.data.redis.password:}") String password
-    ) {
+            @Value("${spring.data.redis.password:}") String password) {
         int port = 6379;
         try {
             if (portStr != null && !portStr.startsWith("tcp://")) {
@@ -165,6 +163,14 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
         return factory;
     }
 
+    @Bean(name = "sharedSyncRedisMessageListenerContainer")
+    public org.springframework.data.redis.listener.RedisMessageListenerContainer sharedSyncRedisMessageListenerContainer(
+            @Qualifier("pubSubConnectionFactory") RedisConnectionFactory connectionFactory) {
+        org.springframework.data.redis.listener.RedisMessageListenerContainer container = new org.springframework.data.redis.listener.RedisMessageListenerContainer();
+        container.setConnectionFactory(connectionFactory);
+        return container;
+    }
+
     @Bean
     public GenericJackson2JsonRedisSerializer redisValueSerializer() {
         ObjectMapper objectMapper = new ObjectMapper();
@@ -173,8 +179,7 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
         objectMapper.activateDefaultTyping(
                 LaissezFaireSubTypeValidator.instance,
                 ObjectMapper.DefaultTyping.NON_FINAL,
-                JsonTypeInfo.As.PROPERTY
-        );
+                JsonTypeInfo.As.PROPERTY);
         return new GenericJackson2JsonRedisSerializer(objectMapper);
     }
 
@@ -195,7 +200,9 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
      */
     @Bean(name = "globalCacheStore")
     @SuppressWarnings("rawtypes")
-    public CacheStore redisCacheStore(@Qualifier("sharedSyncRedisConnectionFactory") RedisConnectionFactory connectionFactory, GenericJackson2JsonRedisSerializer serializer) {
+    public CacheStore redisCacheStore(
+            @Qualifier("sharedSyncRedisConnectionFactory") RedisConnectionFactory connectionFactory,
+            GenericJackson2JsonRedisSerializer serializer) {
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
         configureSerializers(template, serializer);
@@ -203,8 +210,6 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
         System.out.println("[SharedSync] Using Redis cache store");
         return new RedisCacheStore<>(template);
     }
-
-
 
     @Override
     public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) throws BeansException {
@@ -250,11 +255,10 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
 
     private static void configureSerializers(
             RedisTemplate<String, ?> template,
-            GenericJackson2JsonRedisSerializer customSerializer
-    ) {
+            GenericJackson2JsonRedisSerializer customSerializer) {
         StringRedisSerializer stringSerializer = new StringRedisSerializer();
-        GenericJackson2JsonRedisSerializer serializer =
-                customSerializer != null ? customSerializer : new GenericJackson2JsonRedisSerializer();
+        GenericJackson2JsonRedisSerializer serializer = customSerializer != null ? customSerializer
+                : new GenericJackson2JsonRedisSerializer();
         template.setKeySerializer(stringSerializer);
         template.setHashKeySerializer(stringSerializer);
         template.setValueSerializer(serializer);
@@ -275,7 +279,8 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
         }
 
         @Autowired
-        public void setConnectionFactory(@Qualifier("sharedSyncRedisConnectionFactory") RedisConnectionFactory connectionFactory) {
+        public void setConnectionFactory(
+                @Qualifier("sharedSyncRedisConnectionFactory") RedisConnectionFactory connectionFactory) {
             this.connectionFactory = connectionFactory;
         }
 
