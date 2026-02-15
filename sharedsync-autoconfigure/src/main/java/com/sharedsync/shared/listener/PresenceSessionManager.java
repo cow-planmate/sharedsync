@@ -75,6 +75,18 @@ public class PresenceSessionManager {
         presenceStorage.mapSessionToRoot(sessionId, rootId, presenceProperties.getSessionTimeout());
         presenceStorage.addActiveSession(userId, sessionId);
 
+        // 유저 정보 저장 (UserProvider 활용)
+        if (authProperties.isEnabled()) {
+            try {
+                Map<String, Object> info = userProvider.findUserInfoByUserId(userId);
+                if (info != null && !info.isEmpty()) {
+                    presenceStorage.saveUserInfo(userId, info);
+                }
+            } catch (Exception e) {
+                log.warn("[PresenceManager] Failed to save user info for userId={}: {}", userId, e.getMessage());
+            }
+        }
+
         if (isFirstUser) {
             if (interceptedSync) {
                 log.info(
