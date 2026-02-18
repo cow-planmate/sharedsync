@@ -73,4 +73,31 @@ public class SharedSyncPresenceProperties {
     public void setSyncDelay(long syncDelay) {
         this.syncDelay = syncDelay;
     }
+
+    /**
+     * 주기적 DB 동기화 간격 (단위: 초). 기본값 30초.
+     * 0 이하로 설정하면 주기적 동기화를 사용하지 않습니다.
+     */
+    private long periodicSyncInterval = 30;
+
+    /**
+     * 주기적 DB 동기화 활성화 여부.
+     */
+    private boolean periodicSyncEnabled = true;
+
+    public long getPeriodicSyncInterval() {
+        return periodicSyncInterval;
+    }
+
+    public void setPeriodicSyncInterval(long periodicSyncInterval) {
+        this.periodicSyncInterval = periodicSyncInterval;
+    }
+
+    public boolean isPeriodicSyncEnabled() {
+        return periodicSyncEnabled;
+    }
+
+    public void setPeriodicSyncEnabled(boolean periodicSyncEnabled) {
+        this.periodicSyncEnabled = periodicSyncEnabled;
+    }
 }
