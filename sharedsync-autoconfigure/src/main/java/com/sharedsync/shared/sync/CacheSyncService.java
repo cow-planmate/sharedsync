@@ -40,23 +40,20 @@ public class CacheSyncService {
 
     @Transactional
     public void syncToDatabase(String rootId) {
-        syncToDatabase(rootId, false);
+        syncToDatabase(rootId, true);
     }
 
     /**
-     * 캐시 데이터를 DB에 동기화합니다.
+     * DB로 데이터를 동기화합니다.
      * 
-     * @param rootId    루트 엔티티 ID
-     * @param keepCache true면 DB 동기화만 수행하고 캐시는 유지 (주기적 동기화용),
-     *                  false면 동기화 후 캐시 삭제 (디스커넥트 시)
+     * @param clearCache true이면 동기화 성공 후 캐시에서 데이터를 삭제합니다.
      */
     @Transactional
-    public void syncToDatabase(String rootId, boolean keepCache) {
-        log.info("[CacheSync] [TRACE-F5] Request received for rootId={}, keepCache={}", rootId, keepCache);
+    public void syncToDatabase(String rootId, boolean clearCache) {
+        log.info("[CacheSync] [TRACE-F5] Sync request received for rootId={}, clearCache={}", rootId, clearCache);
 
-        // keepCache=false (디스커넥트 동기화)일 때만 Active tracker 체크
-        // keepCache=true (주기적 동기화)는 유저 접속 중 DB 백업이 목적이므로 체크 건너뜀
-        if (!keepCache && presenceStorage.hasTracker(rootId)) {
+        // 1. (사용자가 나갔을 때만) 동기화 도중 유저가 접속하면 중단 (이외 주기적 동기화는 무시)
+        if (clearCache && presenceStorage.hasTracker(rootId)) {
             log.info("[CacheSync] [TRACE-F5] Sync aborted for rootId={}: Active tracker detected. (User returned)",
                     rootId);
             return;
@@ -82,49 +79,45 @@ public class CacheSyncService {
         Object rootIdTyped = rootRepository.convertStringToId(rootId);
         List<CacheDeletionEntry> deletionQueue = new ArrayList<>();
 
-        syncRecursively(rootRepository, rootIdTyped, deletionQueue, rootId, keepCache);
-
-        // keepCache=true면 캐시 삭제를 건너뜀 (주기적 동기화 시)
-        if (keepCache) {
-            log.info("[CacheSync] Periodic sync completed for rootId={}, cache retained.", rootId);
-            return;
-        }
+        syncRecursively(rootRepository, rootIdTyped, deletionQueue, rootId, clearCache);
 
         // Phase 2: 캐시 일괄 삭제 (트랜잭션 커밋 후 실행)
-        // DB 트랜잭션이 아직 활성 상태라면 afterCommit 동기화 등록
-        if (TransactionSynchronizationManager.isActualTransactionActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    log.info("[CacheSync] Transaction committed. Starting batch cache deletion for rootId={}", rootId);
-                    for (CacheDeletionEntry entry : deletionQueue) {
-                        try {
-                            entry.repository.deleteCacheByIdUnchecked(entry.id);
-                        } catch (Exception e) {
-                            log.error("[CacheSync] Failed to delete cache for id={} in repo={}", entry.id,
-                                    entry.repository.getClass().getSimpleName(), e);
+        if (clearCache && !deletionQueue.isEmpty()) {
+            // DB 트랜잭션이 아직 활성 상태라면 afterCommit 동기화 등록
+            if (TransactionSynchronizationManager.isActualTransactionActive()) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        log.info("[CacheSync] Transaction committed. Starting batch cache deletion for rootId={}",
+                                rootId);
+                        for (CacheDeletionEntry entry : deletionQueue) {
+                            try {
+                                entry.repository.deleteCacheByIdUnchecked(entry.id);
+                            } catch (Exception e) {
+                                log.error("[CacheSync] Failed to delete cache for id={} in repo={}", entry.id,
+                                        entry.repository.getClass().getSimpleName(), e);
+                            }
                         }
                     }
+                });
+            } else {
+                // 트랜잭션이 없는 경우 (거의 없겠지만) 즉시 삭제
+                log.warn("[CacheSync] No active transaction. Deleting cache immediately for rootId={}", rootId);
+                for (CacheDeletionEntry entry : deletionQueue) {
+                    entry.repository.deleteCacheByIdUnchecked(entry.id);
                 }
-            });
-        } else {
-            // 트랜잭션이 없는 경우 (거의 없겠지만) 즉시 삭제
-            log.warn("[CacheSync] No active transaction. Deleting cache immediately for rootId={}", rootId);
-            for (CacheDeletionEntry entry : deletionQueue) {
-                entry.repository.deleteCacheByIdUnchecked(entry.id);
             }
         }
     }
 
     private void syncRecursively(AutoCacheRepository<?, ?, ?> repository, Object id,
-            List<CacheDeletionEntry> deletionQueue, String rootId, boolean keepCache) {
+            List<CacheDeletionEntry> deletionQueue, String rootId, boolean clearCache) {
         if (repository == null || id == null) {
             return;
         }
 
-        // 동기화 도중 유저가 접속하면 중단 (데이터 유실 방지 핵심 로직)
-        // keepCache=true (주기적 동기화)일 때는 유저 접속 중이므로 이 체크를 건너뜀
-        if (!keepCache && presenceStorage.hasTracker(rootId)) {
+        // 1. (사용자가 나갔을 때만) 동기화 도중 유저가 접속하면 중지 (이외 주기적 동기화는 무시)
+        if (clearCache && presenceStorage.hasTracker(rootId)) {
             log.info("[CacheSync] Aborting recursive sync for rootId={} because user activity detected", rootId);
             return;
         }
@@ -162,11 +155,16 @@ public class CacheSyncService {
                     .filter(childRepo::isPersistentId)
                     .collect(Collectors.toSet());
 
-            childRepo.deleteEntitiesNotInCache(id, persistentIds);
+                Set<Object> tombstonedIds = childRepo.consumeDeletedPersistentIdsByParentUnchecked(
+                    id,
+                    repository.getEntityType());
+                childRepo.deleteEntitiesByIdsUnchecked(tombstonedIds);
 
-            persistentIds.forEach(childId -> syncRecursively(childRepo, childId, deletionQueue, rootId, keepCache));
+            persistentIds.forEach(childId -> syncRecursively(childRepo, childId, deletionQueue, rootId, clearCache));
         }
-        // 캐시 삭제를 바로 하지 않고, 삭제 대상 큐에 추가 (Phase 2에서 일괄 삭제)
-        deletionQueue.add(new CacheDeletionEntry(repository, id));
+        // 캐시 삭제를 위해 큐에 추가
+        if (clearCache) {
+            deletionQueue.add(new CacheDeletionEntry(repository, id));
+        }
     }
 }
