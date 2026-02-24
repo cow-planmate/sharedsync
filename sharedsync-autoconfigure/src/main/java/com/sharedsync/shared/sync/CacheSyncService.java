@@ -152,6 +152,9 @@ public class CacheSyncService {
                     .filter(Objects::nonNull)
                     .forEach(childRepo::syncToDatabaseByDtoUnchecked);
 
+            // 삭제 추적 Set 기반으로 DB에서 삭제 (비교 방식보다 안정적)
+            childRepo.deleteEntitiesByDeletedSet();
+
             List<?> refreshed = childRepo.findDtoListByParentIdUnchecked(id);
             if (refreshed == null) {
                 refreshed = List.of();
@@ -161,8 +164,6 @@ public class CacheSyncService {
                     .filter(Objects::nonNull)
                     .filter(childRepo::isPersistentId)
                     .collect(Collectors.toSet());
-
-            childRepo.deleteEntitiesNotInCache(id, persistentIds);
 
             persistentIds.forEach(childId -> syncRecursively(childRepo, childId, deletionQueue, rootId, keepCache));
         }

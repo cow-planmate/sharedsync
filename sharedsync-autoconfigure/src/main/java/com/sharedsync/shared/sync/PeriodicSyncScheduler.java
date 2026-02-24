@@ -7,6 +7,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.springframework.stereotype.Component;
 
+import com.sharedsync.shared.id.IdPoolService;
 import com.sharedsync.shared.properties.SharedSyncPresenceProperties;
 import com.sharedsync.shared.storage.PresenceStorage;
 
@@ -29,6 +30,7 @@ public class PeriodicSyncScheduler {
     private final CacheSyncService cacheSyncService;
     private final PresenceStorage presenceStorage;
     private final SharedSyncPresenceProperties presenceProperties;
+    private final IdPoolService idPoolService;
 
     private ScheduledExecutorService scheduler;
 
@@ -78,6 +80,11 @@ public class PeriodicSyncScheduler {
      */
     private void syncAllActiveRooms() {
         try {
+            // Redis Pool이 비어있으면 DB 시퀀스에서 리필 (nextId 호출 시 자동 처리되므로 여기서는 체크만)
+            if (!idPoolService.isRedisPoolIntact()) {
+                log.warn("[PeriodicSync] Redis IdPool data missing. Will be refilled on next ID request.");
+            }
+
             Set<String> allRoomIds = presenceStorage.getAllRoomIds();
             if (allRoomIds == null || allRoomIds.isEmpty()) {
                 return;

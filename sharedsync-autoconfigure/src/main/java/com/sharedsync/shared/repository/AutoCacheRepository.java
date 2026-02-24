@@ -185,6 +185,29 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             try {
                 IdPoolService idPoolService = applicationContext.getBean(IdPoolService.class);
                 idPoolService.registerPool(sequenceName, allocationSize);
+
+                // Redis에 기존 Pool이 있으면 시퀀스 리셋 없이 Redis에서 복원
+                // Redis에 없을 때만 시퀀스를 현재 최대 ID로 리셋 후 새로 할당
+                if (!idPoolService.isRedisPoolIntact()) {
+                    try {
+                        String entityName = getEntityClass().getSimpleName();
+                        String idFieldName = entityIdField.getName();
+                        Long maxId = entityManager.createQuery(
+                                "SELECT MAX(e." + idFieldName + ") FROM " + entityName + " e", Long.class)
+                                .getSingleResult();
+                        if (maxId != null) {
+                            idPoolService.resetSequenceToMaxId(sequenceName, maxId);
+                            log.info("[AutoCacheRepository] Sequence '{}' reset to current max ID={} for entity={}",
+                                    sequenceName, maxId, entityName);
+                        }
+                    } catch (Exception e) {
+                        log.warn("[AutoCacheRepository] 시퀀스 리셋 실패 (무시하고 계속): {}", e.getMessage());
+                    }
+                } else {
+                    log.info("[AutoCacheRepository] Redis pool exists for '{}', skipping sequence reset",
+                            sequenceName);
+                }
+
                 idPoolService.initializePool(sequenceName);
                 log.info("[AutoCacheRepository] ID Pool initialized: entity={}, sequence={}, allocationSize={}",
                         getEntityClass().getSimpleName(), sequenceName, allocationSize);
@@ -300,6 +323,41 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     protected final String getRedisKey(ID id) {
         return cacheKeyPrefix + ":DATA";
+    }
+
+    /**
+     * 삭제 추적용 Redis Set 키를 반환합니다.
+     * 캐시에서 삭제된 영속 ID를 별도로 저장하여 동기화 시 안정적으로 DB에서 삭제합니다.
+     */
+    protected final String getDeletedSetKey() {
+        return cacheKeyPrefix + ":DELETED";
+    }
+
+    /**
+     * 삭제된 영속 ID를 추적 Set에 추가합니다.
+     * 임시 ID(음수)나 null은 추적하지 않습니다.
+     */
+    private void trackDeletedId(ID id) {
+        if (id == null) return;
+        // 임시(음수) ID는 DB에 없으므로 추적 불필요
+        if (!useIdPool && id instanceof Number number && number.longValue() < 0L) {
+            return;
+        }
+        getCacheStore().addToSet(getDeletedSetKey(), String.valueOf(id));
+    }
+
+    /**
+     * 추적된 삭제 ID 목록을 반환합니다.
+     */
+    public Set<String> getDeletedIds() {
+        return getCacheStore().getSet(getDeletedSetKey());
+    }
+
+    /**
+     * 추적된 삭제 ID 목록을 초기화합니다.
+     */
+    public void clearDeletedIds() {
+        getCacheStore().delete(getDeletedSetKey());
     }
 
     private String getParentIndexField(Class<?> parentClass, Object parentId) {
@@ -1598,6 +1656,9 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             return;
         }
 
+        // 삭제 추적: 영속 ID를 DELETED Set에 기록 (동기화 시 DB에서 삭제할 대상)
+        trackDeletedId(id);
+
         String hashKey = getRedisKey(id);
         // 부모 인덱스에서 제거를 위해 DTO 조회
         DTO dto = getCacheStore().hashGet(hashKey, String.valueOf(id));
@@ -1896,6 +1957,49 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
         handleChildCleanupBeforeDelete(targets);
         deleteAllEntities(targets);
+    }
+
+    /**
+     * 삭제 추적 Set(DELETED)에 기록된 ID들을 기반으로 DB에서 엔티티를 삭제합니다.
+     * 비교 기반 삭제(deleteEntitiesNotInCache)보다 안정적입니다.
+     * - 명시적으로 삭제된 항목만 DB에서 제거
+     * - 캐시 손실/레이스 컨디션에 의한 오삭제 방지
+     */
+    @SuppressWarnings("unchecked")
+    public void deleteEntitiesByDeletedSet() {
+        Set<String> deletedIdStrings = getDeletedIds();
+        if (deletedIdStrings == null || deletedIdStrings.isEmpty()) {
+            return;
+        }
+
+        log.info("[CacheRepository] Processing deleted set: entity={}, count={}, ids={}",
+                cacheKeyPrefix, deletedIdStrings.size(), deletedIdStrings);
+
+        List<T> entitiesToDelete = new ArrayList<>();
+
+        for (String idStr : deletedIdStrings) {
+            try {
+                ID typedId = convertStringToId(idStr);
+                if (typedId == null) continue;
+
+                T entity = (T) entityManager.find(getEntityClass(), typedId);
+                if (entity != null) {
+                    entitiesToDelete.add(entity);
+                }
+            } catch (Exception e) {
+                log.warn("[CacheRepository] Failed to find entity for deleted id={}: {}", idStr, e.getMessage());
+            }
+        }
+
+        if (!entitiesToDelete.isEmpty()) {
+            handleChildCleanupBeforeDelete(entitiesToDelete);
+            deleteAllEntities(entitiesToDelete);
+            log.info("[CacheRepository] Deleted {} entities from DB by tracked set for entity={}",
+                    entitiesToDelete.size(), cacheKeyPrefix);
+        }
+
+        // 처리 완료 후 삭제 추적 Set 초기화
+        clearDeletedIds();
     }
 
     @SuppressWarnings("unchecked")

@@ -1,20 +1,19 @@
 package com.sharedsync.shared.id;
 
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 개별 엔티티 타입의 ID Pool 관리 클래스.
- * DB 시퀀스에서 미리 할당받은 ID를 Thread-safe하게 제공합니다.
+ * 개별 엔티티 타입의 ID Pool 설정 및 리필 동기화를 관리하는 클래스.
+ * 실제 ID 저장소는 Redis Set (IDPOOL:{sequenceName})이며,
+ * 이 클래스는 설정과 리필 플래그만 보유합니다.
  */
 @Slf4j
 public class IdPool {
 
     private final String sequenceName;
     private final int allocationSize;
-    private final ConcurrentLinkedQueue<Long> pool = new ConcurrentLinkedQueue<>();
     private final AtomicBoolean refilling = new AtomicBoolean(false);
 
     /**
@@ -36,46 +35,10 @@ public class IdPool {
     }
 
     /**
-     * Pool에서 다음 ID를 꺼냅니다.
-     * Pool이 비어있으면 null을 반환합니다 (호출자가 동기적으로 리필해야 함).
+     * 주어진 현재 Pool 크기가 리필 임계값 이하인지 확인합니다.
      */
-    public Long poll() {
-        return pool.poll();
-    }
-
-    /**
-     * Pool에 ID를 추가합니다.
-     */
-    public void offer(Long id) {
-        pool.offer(id);
-    }
-
-    /**
-     * Pool에 여러 ID를 일괄 추가합니다.
-     */
-    public void addAll(java.util.Collection<Long> ids) {
-        pool.addAll(ids);
-    }
-
-    /**
-     * Pool의 현재 크기를 반환합니다.
-     */
-    public int size() {
-        return pool.size();
-    }
-
-    /**
-     * Pool이 비어있는지 확인합니다.
-     */
-    public boolean isEmpty() {
-        return pool.isEmpty();
-    }
-
-    /**
-     * 비동기 리필이 필요한지 확인합니다.
-     */
-    public boolean needsRefill() {
-        return pool.size() <= (int) (allocationSize * REFILL_THRESHOLD_RATIO);
+    public boolean needsRefill(long currentSize) {
+        return currentSize <= (int) (allocationSize * REFILL_THRESHOLD_RATIO);
     }
 
     /**
