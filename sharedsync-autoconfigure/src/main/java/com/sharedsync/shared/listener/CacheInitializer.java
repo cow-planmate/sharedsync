@@ -13,11 +13,9 @@ import com.sharedsync.shared.storage.PresenceStorage;
 
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
 @Component
 @RequiredArgsConstructor
-@Slf4j
 public class CacheInitializer {
 
     private final ApplicationContext context;
@@ -49,61 +47,15 @@ public class CacheInitializer {
             return;
         }
 
-        Object typedRootId;
-        try {
-            typedRootId = rootRepo.convertStringToId(rootId);
-        } catch (Exception e) {
-            typedRootId = rootId;
-        }
-
-        if (rootRepo.findDtoByIdUnchecked(typedRootId) != null
-            && !hasPartialMissingDescendants(rootRepo, typedRootId)) {
-            log.debug("[CacheInitializer] Skip DB load for rootId={} because cache already exists.", rootId);
-            return;
-        }
-
         // 로딩 시작 마킹
         presenceStorage.setIsLoading(rootId, true);
 
         try {
-            loadRecursively(rootRepo, typedRootId);
+            loadRecursively(rootRepo, rootId);
         } finally {
             // 로딩 완료 후 해제 (성공하든 실패하든)
             presenceStorage.setIsLoading(rootId, false);
         }
-    }
-
-    @SuppressWarnings({ "rawtypes", "unchecked" })
-    private boolean hasPartialMissingDescendants(AutoCacheRepository parentRepo, Object parentId) {
-        List<AutoCacheRepository<?, ?, ?>> childRepos = cacheMap.values().stream()
-                .filter(repo -> repo != parentRepo)
-                .filter(repo -> repo.hasParentRepository(parentRepo))
-                .toList();
-
-        if (childRepos.isEmpty()) {
-            return false;
-        }
-
-        boolean hasAnyChildData = false;
-        boolean hasAnyMissingChild = false;
-
-        for (AutoCacheRepository childRepo : childRepos) {
-            List<? extends CacheDto<?>> childDtos = childRepo.findDtoListByParentIdUnchecked(parentId);
-            if (childDtos != null && !childDtos.isEmpty()) {
-                hasAnyChildData = true;
-
-                for (CacheDto<?> childDto : childDtos) {
-                    Object childId = childRepo.extractIdUnchecked(childDto);
-                    if (childId != null && hasPartialMissingDescendants(childRepo, childId)) {
-                        return true;
-                    }
-                }
-            } else {
-                hasAnyMissingChild = true;
-            }
-        }
-
-        return hasAnyChildData && hasAnyMissingChild;
     }
 
     /**

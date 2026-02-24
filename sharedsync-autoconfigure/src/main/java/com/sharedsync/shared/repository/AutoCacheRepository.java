@@ -22,6 +22,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.data.redis.core.RedisTemplate;
 
 import com.sharedsync.shared.annotation.Cache;
+import com.sharedsync.shared.annotation.CacheEntity;
 import com.sharedsync.shared.annotation.CacheId;
 import com.sharedsync.shared.annotation.EntityConverter;
 import com.sharedsync.shared.annotation.IgnoreShared;
@@ -29,8 +30,10 @@ import com.sharedsync.shared.annotation.ParentId;
 import com.sharedsync.shared.annotation.TableName;
 import com.sharedsync.shared.dto.CacheDto;
 import com.sharedsync.shared.history.HistoryAction;
+import com.sharedsync.shared.id.IdPoolService;
 import com.sharedsync.shared.storage.PresenceStorage;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.criteria.CriteriaBuilder;
@@ -67,6 +70,11 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     private final List<Field> ignoredEntityFields;
 
     private final List<Field> dtoFields;
+
+    // ID Pool 관련 필드
+    private final String sequenceName;
+    private final int allocationSize;
+    private final boolean useIdPool;
 
     public Class<DTO> getDtoClass() {
         return dtoClass;
@@ -153,6 +161,37 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 .filter(field -> !Modifier.isStatic(field.getModifiers()))
                 .peek(field -> field.setAccessible(true))
                 .collect(Collectors.collectingAndThen(Collectors.toList(), Collections::unmodifiableList));
+
+        // @CacheEntity에서 sequenceName 읽기 (엔티티 클래스에서)
+        CacheEntity cacheEntityAnnotation = getEntityClass().getAnnotation(CacheEntity.class);
+        if (cacheEntityAnnotation != null && cacheEntityAnnotation.sequenceName() != null
+                && !cacheEntityAnnotation.sequenceName().isEmpty()) {
+            this.sequenceName = cacheEntityAnnotation.sequenceName();
+            this.allocationSize = cacheEntityAnnotation.allocationSize();
+            this.useIdPool = true;
+        } else {
+            this.sequenceName = null;
+            this.allocationSize = 0;
+            this.useIdPool = false;
+        }
+    }
+
+    /**
+     * 스프링 빈 초기화 후 ID Pool 등록 및 초기 할당
+     */
+    @PostConstruct
+    private void initIdPool() {
+        if (useIdPool) {
+            try {
+                IdPoolService idPoolService = applicationContext.getBean(IdPoolService.class);
+                idPoolService.registerPool(sequenceName, allocationSize);
+                idPoolService.initializePool(sequenceName);
+                log.info("[AutoCacheRepository] ID Pool initialized: entity={}, sequence={}, allocationSize={}",
+                        getEntityClass().getSimpleName(), sequenceName, allocationSize);
+            } catch (Exception e) {
+                log.warn("[AutoCacheRepository] ID Pool 초기화 실패 (fallback to negative ID): {}", e.getMessage());
+            }
+        }
     }
 
     // ==== CacheRepository 인터페이스 기본 CRUD 구현 ====
@@ -214,26 +253,25 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             id = changeType(id);
 
             if (id == null) {
-                Object temporaryId = null;
+                Object generatedId = null;
                 if (idClass.getSimpleName().equals("Integer")) {
-                    temporaryId = generateTemporaryId();
+                    generatedId = generateId().intValue();
                 } else if (idClass.getSimpleName().equals("Long")) {
-                    temporaryId = Long.valueOf(generateTemporaryId());
+                    generatedId = generateId();
                 } else if (idClass.getSimpleName().equals("String")) {
-                    temporaryId = String.valueOf(generateTemporaryId());
+                    generatedId = String.valueOf(generateId());
                 } else if (idClass.getSimpleName().equals("UUID")) {
-                    temporaryId = java.util.UUID.randomUUID();
+                    generatedId = java.util.UUID.randomUUID();
                 }
 
-                if (temporaryId != null) {
-                    dto = updateDtoWithId(dto, (ID) temporaryId);
+                if (generatedId != null) {
+                    dto = updateDtoWithId(dto, (ID) generatedId);
                     iterator.set(dto);
                     id = extractId(dto);
                 }
             }
             String hashKey = getRedisKey(id);
             getCacheStore().hashSet(hashKey, String.valueOf(id), dto);
-            clearDeletionMarkersForDto(dto, id);
 
             // 부모 ID 인덱스 추가
             for (Map.Entry<Field, Class<?>> entry : parentEntityClassMap.entrySet()) {
@@ -266,41 +304,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     private String getParentIndexField(Class<?> parentClass, Object parentId) {
         return "P_IDX:" + parentClass.getSimpleName() + ":" + parentId;
-    }
-
-    private String getDeletionMarkerKey(Class<?> parentClass, Object parentId) {
-        return cacheKeyPrefix + ":DEL:" + parentClass.getSimpleName() + ":" + parentId;
-    }
-
-    private void addDeletionMarker(Class<?> parentClass, Object parentId, ID id) {
-        if (parentClass == null || parentId == null || id == null || !isPersistentId(id)) {
-            return;
-        }
-        getCacheStore().addToSet(getDeletionMarkerKey(parentClass, parentId), String.valueOf(id));
-    }
-
-    private void removeDeletionMarker(Class<?> parentClass, Object parentId, ID id) {
-        if (parentClass == null || parentId == null || id == null) {
-            return;
-        }
-        getCacheStore().removeFromSet(getDeletionMarkerKey(parentClass, parentId), String.valueOf(id));
-    }
-
-    private void clearDeletionMarkersForDto(DTO dto, ID id) {
-        if (dto == null || id == null || !isPersistentId(id)) {
-            return;
-        }
-
-        for (Map.Entry<Field, Class<?>> entry : parentEntityClassMap.entrySet()) {
-            try {
-                Object parentId = entry.getKey().get(dto);
-                if (parentId != null) {
-                    removeDeletionMarker(entry.getValue(), parentId, id);
-                }
-            } catch (IllegalAccessException e) {
-                // ignore
-            }
-        }
     }
 
     private void addIdToParentIndex(String hashKey, Class<?> parentClass, Object parentId, ID id) {
@@ -409,32 +412,33 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     /**
-     * ID가 null일 경우 임시 음수 ID를 생성하여 저장
+     * ID가 null일 경우 ID Pool 또는 음수 임시 ID를 생성하여 저장
      */
     @SuppressWarnings("unchecked")
     public DTO save(DTO dto) {
         ID id = extractId(dto);
 
-        // ID가 null이면 임시 ID 생성
+        // ID가 null이면 ID 생성
         if (id == null) {
-            Object temporaryId = null;
+            Object generatedId = null;
             if (idClass.getSimpleName().equals("UUID")) {
-                temporaryId = java.util.UUID.randomUUID();
+                generatedId = java.util.UUID.randomUUID();
             } else if (idClass.getSimpleName().equals("Long")) {
-                temporaryId = Long.valueOf(generateTemporaryId());
+                generatedId = generateId();
             } else if (idClass.getSimpleName().equals("String")) {
-                temporaryId = String.valueOf(generateTemporaryId());
+                generatedId = String.valueOf(generateId());
+            } else if (idClass.getSimpleName().equals("Integer")) {
+                generatedId = generateId().intValue();
             } else {
-                temporaryId = generateTemporaryId();
+                generatedId = generateId().intValue();
             }
 
-            dto = updateDtoWithId(dto, (ID) temporaryId);
+            dto = updateDtoWithId(dto, (ID) generatedId);
             id = extractId(dto);
         }
 
         String hashKey = getRedisKey(id);
         getCacheStore().hashSet(hashKey, String.valueOf(id), dto);
-        clearDeletionMarkersForDto(dto, id);
 
         // 부모 ID 인덱스 추가
         for (Map.Entry<Field, Class<?>> entry : parentEntityClassMap.entrySet()) {
@@ -468,14 +472,13 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
         String hashKey = getRedisKey(id);
         DTO existingDto = getCacheStore().hashGet(hashKey, String.valueOf(id));
-        DTO dtoBeforeMerge = existingDto;
+        List<Object> oldParentIds = Collections.emptyList();
         if (existingDto != null) {
+            oldParentIds = extractParentIds(existingDto);
             dto = mergeDto(existingDto, dto);
         }
 
         getCacheStore().hashSet(hashKey, String.valueOf(id), dto);
-        clearDeletionMarkersForDto(dtoBeforeMerge, id);
-        clearDeletionMarkersForDto(dto, id);
 
         // 부모 ID 인덱스 업데이트
         for (Map.Entry<Field, Class<?>> entry : parentEntityClassMap.entrySet()) {
@@ -587,18 +590,22 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     }
 
     /**
-     * CacheStore의 decrement를 사용하여 원자적으로 임시 음수 ID 생성
-     * 동시성 문제 없이 고유한 음수 ID 보장
-     * 각 엔티티 타입별로 별도의 카운터 사용
+     * ID 생성: Pool 모드면 DB 시퀀스에서 미리 할당받은 양수 ID 반환,
+     * 아니면 기존 CacheStore DECR 방식으로 음수 임시 ID 반환.
      */
-    private Integer generateTemporaryId() {
-        // 엔티티 타입별로 별도의 카운터 키 사용 (예: "temporary:timetableplaceblock:counter")
+    private Long generateId() {
+        if (useIdPool) {
+            try {
+                IdPoolService idPoolService = applicationContext.getBean(IdPoolService.class);
+                return idPoolService.nextId(sequenceName);
+            } catch (Exception e) {
+                log.warn("[AutoCacheRepository] ID Pool에서 ID 할당 실패, 음수 ID fallback: {}", e.getMessage());
+            }
+        }
+        // fallback: 기존 음수 ID 방식
         String counterKey = "temporary:" + cacheKeyPrefix + ":counter";
-
-        // DECR 명령: 키가 없으면 0에서 시작해서 -1 반환, 이후 -2, -3, ...
         Long counter = getCacheStore().decrement(counterKey);
-
-        return counter.intValue();
+        return counter;
     }
 
     /**
@@ -1599,7 +1606,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 try {
                     Object parentId = entry.getKey().get(dto);
                     if (parentId != null) {
-                        addDeletionMarker(entry.getValue(), parentId, id);
                         removeIdFromParentIndex(hashKey, entry.getValue(), parentId, id);
                     }
                 } catch (IllegalAccessException e) {
@@ -1834,6 +1840,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
     public List<DTO> syncToDatabaseByParentIdUnchecked(Object parentId) {
         return syncToDatabaseByParentId((ID) parentId);
     }
+
     @SuppressWarnings("unchecked")
     public void deleteEntitiesNotInCache(Object parentId, Set<Object> persistentIds) {
         if (parentIdFields.isEmpty() || parentId == null) {
@@ -1891,73 +1898,6 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         deleteAllEntities(targets);
     }
 
-    public Set<ID> consumeDeletedPersistentIdsByParent(Object parentId, Class<?> parentClass) {
-        if (parentIdFields.isEmpty() || parentId == null || parentClass == null) {
-            return Collections.emptySet();
-        }
-
-        String markerKey = getDeletionMarkerKey(parentClass, parentId);
-        Set<String> markedIds = getCacheStore().getSet(markerKey);
-        if (markedIds == null || markedIds.isEmpty()) {
-            return Collections.emptySet();
-        }
-
-        Set<ID> consumed = new java.util.LinkedHashSet<>();
-        for (String idStr : markedIds) {
-            try {
-                ID id = convertStringToId(idStr);
-                if (isPersistentId(id)) {
-                    consumed.add(id);
-                }
-            } catch (Exception e) {
-                // ignore invalid id marker
-            }
-        }
-
-        markedIds.forEach(idStr -> getCacheStore().removeFromSet(markerKey, idStr));
-        return consumed;
-    }
-
-    @SuppressWarnings("unchecked")
-    public Set<Object> consumeDeletedPersistentIdsByParentUnchecked(Object parentId, Class<?> parentClass) {
-        return (Set<Object>) (Set<?>) consumeDeletedPersistentIdsByParent(parentId, parentClass);
-    }
-
-    public void deleteEntitiesByIds(Set<ID> ids) {
-        if (ids == null || ids.isEmpty()) {
-            return;
-        }
-
-        List<T> targets = ids.stream()
-                .filter(Objects::nonNull)
-                .filter(this::isPersistentId)
-                .map(this::loadEntityByIdCriteria)
-                .filter(Objects::nonNull)
-                .toList();
-
-        if (targets.isEmpty()) {
-            return;
-        }
-
-        handleChildCleanupBeforeDelete(targets);
-        deleteAllEntities(targets);
-    }
-
-    @SuppressWarnings("unchecked")
-    public void deleteEntitiesByIdsUnchecked(Set<Object> ids) {
-        if (ids == null || ids.isEmpty()) {
-            return;
-        }
-
-        Set<ID> typedIds = ids.stream()
-                .filter(Objects::nonNull)
-                .filter(entityIdField.getType()::isInstance)
-                .map(id -> (ID) id)
-                .collect(Collectors.toSet());
-
-        deleteEntitiesByIds(typedIds);
-    }
-
     @SuppressWarnings("unchecked")
     private void handleChildCleanupBeforeDelete(List<T> entitiesToDelete) {
         if (entitiesToDelete == null || entitiesToDelete.isEmpty()) {
@@ -1995,12 +1935,22 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         ID previousId = extractEntityId(entity);
         boolean hasPersistentId = previousId != null && !isTemporaryId(previousId);
 
+        // Pool 모드: ID가 있지만 DB에 아직 존재하지 않을 수 있음
+        boolean isPooledNewEntity = false;
+        if (useIdPool && hasPersistentId) {
+            // DB에 실제 존재하는지 확인
+            T existing = entityManager.find(getEntityClass(), previousId);
+            if (existing == null) {
+                isPooledNewEntity = true;
+            }
+        }
+
         if (!hasPersistentId) {
             setEntityId(entity, null);
         }
 
         T entityToSave = entity;
-        if (hasPersistentId) {
+        if (hasPersistentId && !isPooledNewEntity) {
             ID persistedId = Objects.requireNonNull(previousId);
             T origin = entityManager.find(getEntityClass(), persistedId);
             if (origin != null) {
@@ -2036,7 +1986,13 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             System.err.println("[SharedSync][WARN] failed to validate required relations: " + e.getMessage());
         }
 
-        T savedEntity = saveEntity(entityToSave);
+        T savedEntity;
+        if (isPooledNewEntity) {
+            // Pool ID로 직접 INSERT (OVERRIDING SYSTEM VALUE)
+            savedEntity = insertWithOverridingSystemValue(entityToSave);
+        } else {
+            savedEntity = saveEntity(entityToSave);
+        }
 
         DTO updatedDto = convertToDto(savedEntity);
         ID cacheId = extractId(updatedDto);
@@ -2045,10 +2001,9 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             String cacheKey = getRedisKey(cacheId);
             DTO dtoToCache = Objects.requireNonNull(updatedDto);
             getCacheStore().hashSet(cacheKey, String.valueOf(cacheId), dtoToCache);
-            clearDeletionMarkersForDto(updatedDto, cacheId);
         }
 
-        // 새로 영속화된 ID를 모든 하위 캐시에 전파
+        // 새로 영속화된 ID를 모든 하위 캐시에 전파 (레거시 음수 ID 모드)
         if (isTemporaryId(previousId) && !isTemporaryId(cacheId)) {
             propagateParentIdChange(previousId, cacheId);
         }
@@ -2070,6 +2025,232 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             }
         }
         return updatedDto;
+    }
+
+    /**
+     * Pool ID를 가진 새 엔티티를 DB에 INSERT합니다.
+     * PostgreSQL의 GENERATED ALWAYS AS IDENTITY 컬럼에 명시적 ID를 넣기 위해
+     * OVERRIDING SYSTEM VALUE 구문을 사용합니다.
+     */
+    @SuppressWarnings("unchecked")
+    private T insertWithOverridingSystemValue(T entity) {
+        Class<?> entityClass = getEntityClass();
+        String tableName = getTableName(entityClass);
+
+        List<String> columnNames = new ArrayList<>();
+        List<Object> columnValues = new ArrayList<>();
+
+        // 엔티티의 모든 필드를 순회하며 컬럼 매핑 정보 추출
+        for (Field field : getAllPersistableFields(entityClass)) {
+            field.setAccessible(true);
+
+            // @Transient 및 static/final 필드 제외
+            if (field.isAnnotationPresent(jakarta.persistence.Transient.class)
+                    || Modifier.isStatic(field.getModifiers())
+                    || Modifier.isFinal(field.getModifiers())) {
+                continue;
+            }
+
+            // @OneToMany 등 컬렉션 관계 제외
+            if (field.isAnnotationPresent(jakarta.persistence.OneToMany.class)) {
+                continue;
+            }
+
+            try {
+                Object value = field.get(entity);
+
+                // @ManyToOne 관계: 연관 엔티티에서 FK ID 추출
+                if (field.isAnnotationPresent(jakarta.persistence.ManyToOne.class)) {
+                    jakarta.persistence.JoinColumn joinColumn = field
+                            .getAnnotation(jakarta.persistence.JoinColumn.class);
+                    if (joinColumn == null) {
+                        // @JoinColumn이 없으면 건너뜀 (JPA 기본 매핑 사용 시)
+                        continue;
+                    }
+
+                    boolean isNullable = joinColumn.nullable();
+
+                    if (value == null) {
+                        if (!isNullable) {
+                            log.warn("[AutoCacheRepository] Required FK is null for {}.{}, skipping INSERT",
+                                    entityClass.getSimpleName(), field.getName());
+                            return entity;
+                        }
+                        // nullable FK가 null이면 컬럼 포함하지 않음
+                        continue;
+                    }
+
+                    // 연관 엔티티에서 FK 값 추출 (Hibernate 프록시 지원)
+                    Object fkValue = extractIdFromRelatedEntity(value);
+                    if (fkValue == null) {
+                        if (!isNullable) {
+                            log.warn(
+                                    "[AutoCacheRepository] FK value is null for {}.{} (entity exists but ID is null), skipping INSERT",
+                                    entityClass.getSimpleName(), field.getName());
+                            return entity;
+                        }
+                        continue;
+                    }
+
+                    columnNames.add(joinColumn.name());
+                    columnValues.add(fkValue);
+                    continue;
+                }
+
+                // 일반 컬럼
+                String columnName = getColumnName(field);
+                if (columnName != null && value != null) {
+                    columnNames.add(columnName);
+                    columnValues.add(value);
+                }
+            } catch (IllegalAccessException e) {
+                log.warn("[AutoCacheRepository] Failed to access field {}: {}",
+                        field.getName(), e.getMessage());
+            }
+        }
+
+        if (columnNames.isEmpty()) {
+            log.error("[AutoCacheRepository] No columns to insert for entity: {}", entityClass.getSimpleName());
+            return entity;
+        }
+
+        // INSERT SQL 생성: OVERRIDING SYSTEM VALUE
+        StringBuilder sql = new StringBuilder();
+        sql.append("INSERT INTO ").append(tableName).append(" (");
+        sql.append(String.join(", ", columnNames));
+        sql.append(") OVERRIDING SYSTEM VALUE VALUES (");
+        sql.append(columnNames.stream().map(c -> "?").collect(Collectors.joining(", ")));
+        sql.append(")");
+
+        try {
+            jakarta.persistence.Query query = entityManager.createNativeQuery(sql.toString());
+            for (int i = 0; i < columnValues.size(); i++) {
+                query.setParameter(i + 1, columnValues.get(i));
+            }
+            query.executeUpdate();
+            log.info("[AutoCacheRepository] Inserted entity with Pool ID: table={}, id={}",
+                    tableName, extractEntityId(entity));
+        } catch (Exception e) {
+            log.error("[AutoCacheRepository] Native INSERT failed for {}: {}",
+                    entityClass.getSimpleName(), e.getMessage());
+            // Native INSERT 실패 시 fallback: 기존 persist 방식 시도
+            // 트랜잭션이 깨진 상태이므로, 현재 엔티티를 detach 후 새 persist 시도는 불가능.
+            // DB에 저장되지 않았지만 캐시에는 유지되므로, 다음 주기적 동기화에서 재시도됩니다.
+            log.warn("[AutoCacheRepository] Entity will be retried on next periodic sync. id={}",
+                    extractEntityId(entity));
+        }
+
+        return entity;
+    }
+
+    /**
+     * 엔티티 클래스(상속 포함)의 모든 영속 가능한 필드를 반환합니다.
+     */
+    private List<Field> getAllPersistableFields(Class<?> clazz) {
+        List<Field> fields = new ArrayList<>();
+        Class<?> current = clazz;
+        while (current != null && current != Object.class) {
+            for (Field field : current.getDeclaredFields()) {
+                fields.add(field);
+            }
+            current = current.getSuperclass();
+        }
+        return fields;
+    }
+
+    /**
+     * 연관 엔티티에서 @Id 필드의 값을 추출합니다.
+     * Hibernate 프록시 객체도 지원합니다.
+     */
+    private Object extractIdFromRelatedEntity(Object relatedEntity) {
+        if (relatedEntity == null)
+            return null;
+
+        // Hibernate 프록시인 경우 실제 클래스 가져오기
+        Class<?> clazz = relatedEntity.getClass();
+        try {
+            // org.hibernate.proxy.HibernateProxy 체크
+            if (relatedEntity instanceof org.hibernate.proxy.HibernateProxy proxy) {
+                // LazyInitializer에서 identifier 직접 추출
+                Object identifier = proxy.getHibernateLazyInitializer().getIdentifier();
+                if (identifier != null) {
+                    return identifier;
+                }
+                // 실제 엔티티 클래스로 전환
+                clazz = proxy.getHibernateLazyInitializer().getPersistentClass();
+            }
+        } catch (Exception e) {
+            // Hibernate 프록시가 아닌 경우 무시
+        }
+
+        // @Id 필드 탐색 (상속 계층 포함)
+        Class<?> current = clazz;
+        while (current != null && current != Object.class) {
+            for (Field field : current.getDeclaredFields()) {
+                if (field.isAnnotationPresent(jakarta.persistence.Id.class)
+                        || field.isAnnotationPresent(jakarta.persistence.EmbeddedId.class)) {
+                    field.setAccessible(true);
+                    try {
+                        return field.get(relatedEntity);
+                    } catch (IllegalAccessException e) {
+                        // Getter 메서드로 시도
+                        try {
+                            String getterName = "get" + Character.toUpperCase(field.getName().charAt(0))
+                                    + field.getName().substring(1);
+                            java.lang.reflect.Method getter = clazz.getMethod(getterName);
+                            return getter.invoke(relatedEntity);
+                        } catch (Exception ex) {
+                            log.warn("[AutoCacheRepository] Cannot access @Id field '{}' in {}: {}",
+                                    field.getName(), clazz.getSimpleName(), e.getMessage());
+                        }
+                    }
+                }
+            }
+            current = current.getSuperclass();
+        }
+
+        log.warn("[AutoCacheRepository] No @Id field found in {}", clazz.getSimpleName());
+        return null;
+    }
+
+    /**
+     * 필드의 DB 컬럼 이름을 반환합니다.
+     * 
+     * @Column 어노테이션이 있으면 그 이름을, 없으면 camelCase → snake_case 변환합니다.
+     */
+    private String getColumnName(Field field) {
+        jakarta.persistence.Column column = field.getAnnotation(jakarta.persistence.Column.class);
+        if (column != null && !column.name().isEmpty()) {
+            return column.name();
+        }
+        // @Id 필드: JPA 기본 매핑 (camelCase → snake_case)
+        if (field.isAnnotationPresent(jakarta.persistence.Id.class)) {
+            jakarta.persistence.Column idColumn = field.getAnnotation(jakarta.persistence.Column.class);
+            if (idColumn != null && !idColumn.name().isEmpty()) {
+                return idColumn.name();
+            }
+        }
+        // camelCase → snake_case 변환
+        return camelToSnake(field.getName());
+    }
+
+    /**
+     * camelCase를 snake_case로 변환합니다.
+     */
+    private String camelToSnake(String camelCase) {
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < camelCase.length(); i++) {
+            char c = camelCase.charAt(i);
+            if (Character.isUpperCase(c)) {
+                if (i > 0) {
+                    result.append('_');
+                }
+                result.append(Character.toLowerCase(c));
+            } else {
+                result.append(c);
+            }
+        }
+        return result.toString();
     }
 
     /**
@@ -2165,6 +2346,10 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
     private boolean isTemporaryId(Object id) {
         if (id == null) {
+            return false;
+        }
+        // Pool 모드에서는 항상 양수 ID → 임시 ID가 존재하지 않음
+        if (useIdPool) {
             return false;
         }
         if (id instanceof Number number) {
