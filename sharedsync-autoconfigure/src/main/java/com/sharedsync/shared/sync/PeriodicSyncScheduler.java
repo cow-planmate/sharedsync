@@ -80,9 +80,10 @@ public class PeriodicSyncScheduler {
      */
     private void syncAllActiveRooms() {
         try {
-            // Redis Pool이 비어있으면 DB 시퀀스에서 리필 (nextId 호출 시 자동 처리되므로 여기서는 체크만)
+            // Redis Pool이 비어있으면 즉시 비동기 리필 트리거
             if (!idPoolService.isRedisPoolIntact()) {
-                log.warn("[PeriodicSync] Redis IdPool data missing. Will be refilled on next ID request.");
+                log.info("[PeriodicSync] Redis IdPool data missing. Triggering refill now.");
+                idPoolService.refillEmptyPools();
             }
 
             Set<String> allRoomIds = presenceStorage.getAllRoomIds();

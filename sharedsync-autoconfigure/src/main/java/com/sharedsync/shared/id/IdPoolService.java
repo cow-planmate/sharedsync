@@ -237,12 +237,35 @@ public class IdPoolService {
         if (redisTemplate == null) {
             return false;
         }
+        if (pools.isEmpty()) {
+            return true; // 등록된 Pool이 없으면 체크할 것이 없으므로 정상으로 간주
+        }
         for (String sequenceName : pools.keySet()) {
             if (getRedisPoolSize(sequenceName) == 0) {
                 return false;
             }
         }
-        return !pools.isEmpty();
+        return true;
+    }
+
+    /**
+     * 비어있는 Pool을 모두 비동기로 리필합니다.
+     * PeriodicSyncScheduler에서 주기적으로 호출됩니다.
+     */
+    public void refillEmptyPools() {
+        for (IdPool pool : pools.values()) {
+            long size = getRedisPoolSize(pool.getSequenceName());
+            if (size == 0 && pool.tryStartRefill()) {
+                log.info("[IdPoolService] Pool empty for '{}', triggering async refill.", pool.getSequenceName());
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        refillPool(pool);
+                    } finally {
+                        pool.finishRefill();
+                    }
+                });
+            }
+        }
     }
 
     /**

@@ -162,18 +162,60 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 .peek(field -> field.setAccessible(true))
                 .collect(Collectors.collectingAndThen(Collectors.toList(), Collections::unmodifiableList));
 
-        // @CacheEntity에서 sequenceName 읽기 (엔티티 클래스에서)
+        // @CacheEntity가 붙은 숫자형 ID 엔티티는 무조건 IdPool 사용
+        // sequenceName은 테이블명_컬럼명_seq 패턴으로 자동 유도
         CacheEntity cacheEntityAnnotation = getEntityClass().getAnnotation(CacheEntity.class);
-        if (cacheEntityAnnotation != null && cacheEntityAnnotation.sequenceName() != null
-                && !cacheEntityAnnotation.sequenceName().isEmpty()) {
-            this.sequenceName = cacheEntityAnnotation.sequenceName();
+        if (cacheEntityAnnotation != null && isNumericIdType(this.idClass)) {
             this.allocationSize = cacheEntityAnnotation.allocationSize();
+            this.sequenceName = deriveSequenceName(getEntityClass(), this.entityIdField);
             this.useIdPool = true;
         } else {
             this.sequenceName = null;
-            this.allocationSize = 0;
+            this.allocationSize = cacheEntityAnnotation != null ? cacheEntityAnnotation.allocationSize() : 0;
             this.useIdPool = false;
         }
+    }
+
+    /**
+     * 엔티티 클래스와 ID 필드로부터 PostgreSQL IDENTITY 시퀀스 이름을 자동 유도합니다.
+     * 결과 형식: {table_name}_{column_name}_seq
+     * (예: time_table + time_table_id → time_table_time_table_id_seq)
+     */
+    private static String deriveSequenceName(Class<?> entityClass, Field idField) {
+        jakarta.persistence.Table tableAnnotation = entityClass.getAnnotation(jakarta.persistence.Table.class);
+        String tableName;
+        if (tableAnnotation != null && tableAnnotation.name() != null && !tableAnnotation.name().isEmpty()) {
+            tableName = tableAnnotation.name();
+        } else {
+            tableName = toSnakeCase(entityClass.getSimpleName());
+        }
+
+        jakarta.persistence.Column columnAnnotation = idField.getAnnotation(jakarta.persistence.Column.class);
+        String columnName;
+        if (columnAnnotation != null && columnAnnotation.name() != null && !columnAnnotation.name().isEmpty()) {
+            columnName = columnAnnotation.name();
+        } else {
+            columnName = toSnakeCase(idField.getName());
+        }
+
+        return tableName + "_" + columnName + "_seq";
+    }
+
+    /**
+     * CamelCase 문자열을 snake_case로 변환합니다.
+     */
+    private static String toSnakeCase(String s) {
+        return s.replaceAll("([A-Z])", "_$1").toLowerCase().replaceFirst("^_", "");
+    }
+
+    /**
+     * ID 타입이 숫자형(Long, Integer 등)인지 확인합니다.
+     * UUID 같은 비숫자 타입은 IdPool을 사용하지 않습니다.
+     */
+    private static boolean isNumericIdType(Class<?> type) {
+        return Number.class.isAssignableFrom(type)
+                || type == long.class || type == int.class
+                || type == short.class || type == byte.class;
     }
 
     /**
