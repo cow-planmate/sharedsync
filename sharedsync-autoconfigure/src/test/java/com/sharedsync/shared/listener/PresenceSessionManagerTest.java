@@ -69,7 +69,7 @@ class PresenceSessionManagerTest {
         Map<String, Object> mockUserInfo = new HashMap<>();
         mockUserInfo.put("nickname", "tester");
         given(userProvider.findUserInfoByUserId(userId)).willReturn(mockUserInfo);
-        // buildUserListWithoutDuplicates 에 사용되므로 빈 셋 반환 처리
+        // buildUserListWithoutDuplicates 에 사용되므로 빈 리스트 반환 처리
         given(presenceStorage.getUserIdsInRoom(rootId)).willReturn(Collections.singletonList(userId));
         given(presenceStorage.getUserInfoByUserId(userId)).willReturn(mockUserInfo);
 

@@ -51,7 +51,7 @@ import io.lettuce.core.ReadFrom;
 @EnableCaching
 @Configuration
 @ConditionalOnProperty(name = "sharedsync.cache.type", havingValue = "redis")
-public class RedisConfig implements BeanDefinitionRegistryPostProcessor, ApplicationContextAware {
+public class RedisConfig implements ApplicationContextAware {
 
     private String basePackage = "com"; // fallback 기본값
 
@@ -211,42 +211,48 @@ public class RedisConfig implements BeanDefinitionRegistryPostProcessor, Applica
         return new RedisCacheStore<>(template);
     }
 
-    @Override
-    public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) throws BeansException {
-        // Only scan sharedsync.dto for @Cache-annotated DTOs
-        Reflections reflections = new Reflections("sharedsync.dto");
-        Set<Class<?>> cacheDtos = reflections.getTypesAnnotatedWith(Cache.class);
-
-        for (Class<?> dtoClass : cacheDtos) {
-            if (!CacheDto.class.isAssignableFrom(dtoClass)) {
-                continue;
-            }
-
-            String beanName = resolveBeanName(dtoClass);
-            if (registry.containsBeanDefinition(beanName)) {
-                continue;
-            }
-
-            GenericBeanDefinition beanDefinition = new GenericBeanDefinition();
-            beanDefinition.setBeanClass(DynamicRedisTemplateFactoryBean.class);
-            beanDefinition.getConstructorArgumentValues().addGenericArgumentValue(dtoClass);
-            beanDefinition.setScope(BeanDefinition.SCOPE_SINGLETON);
-            registry.registerBeanDefinition(beanName, beanDefinition);
-        }
+    @Bean
+    public static BeanDefinitionRegistryPostProcessor redisBeanDefinitionRegistryPostProcessor() {
+        return new RedisBeanDefinitionRegistryPostProcessor();
     }
 
-    private String resolveBeanName(Class<?> dtoClass) {
+    private static class RedisBeanDefinitionRegistryPostProcessor implements BeanDefinitionRegistryPostProcessor {
+        @Override
+        public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) throws BeansException {
+            // Only scan sharedsync.dto for @Cache-annotated DTOs
+            Reflections reflections = new Reflections("sharedsync.dto");
+            Set<Class<?>> cacheDtos = reflections.getTypesAnnotatedWith(Cache.class);
 
-        String simpleName = dtoClass.getSimpleName();
-        if (simpleName.endsWith("Dto")) {
-            simpleName = simpleName.substring(0, simpleName.length() - 3);
+            for (Class<?> dtoClass : cacheDtos) {
+                if (!CacheDto.class.isAssignableFrom(dtoClass)) {
+                    continue;
+                }
+
+                String beanName = resolveBeanName(dtoClass);
+                if (registry.containsBeanDefinition(beanName)) {
+                    continue;
+                }
+
+                GenericBeanDefinition beanDefinition = new GenericBeanDefinition();
+                beanDefinition.setBeanClass(DynamicRedisTemplateFactoryBean.class);
+                beanDefinition.getConstructorArgumentValues().addGenericArgumentValue(dtoClass);
+                beanDefinition.setScope(BeanDefinition.SCOPE_SINGLETON);
+                registry.registerBeanDefinition(beanName, beanDefinition);
+            }
         }
-        return Character.toLowerCase(simpleName.charAt(0)) + simpleName.substring(1) + "Redis";
-    }
 
-    @Override
-    public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) {
-        // no-op
+        private String resolveBeanName(Class<?> dtoClass) {
+            String simpleName = dtoClass.getSimpleName();
+            if (simpleName.endsWith("Dto")) {
+                simpleName = simpleName.substring(0, simpleName.length() - 3);
+            }
+            return Character.toLowerCase(simpleName.charAt(0)) + simpleName.substring(1) + "Redis";
+        }
+
+        @Override
+        public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) {
+            // no-op
+        }
     }
 
     private static void configureSerializers(RedisTemplate<String, ?> template) {

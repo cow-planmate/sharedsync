@@ -234,9 +234,10 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                     try {
                         String entityName = getEntityClass().getSimpleName();
                         String idFieldName = entityIdField.getName();
-                        Long maxId = entityManager.createQuery(
-                                "SELECT MAX(e." + idFieldName + ") FROM " + entityName + " e", Long.class)
+                        Object result = entityManager.createQuery(
+                                "SELECT MAX(e." + idFieldName + ") FROM " + entityName + " e")
                                 .getSingleResult();
+                        Long maxId = (result != null) ? ((Number) result).longValue() : null;
                         if (maxId != null) {
                             idPoolService.resetSequenceToMaxId(sequenceName, maxId);
                             log.info("[AutoCacheRepository] Sequence '{}' reset to current max ID={} for entity={}",
@@ -337,6 +338,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
             }
             String hashKey = getRedisKey(id);
             getCacheStore().hashSet(hashKey, String.valueOf(id), dto);
+            removeFromDeletedSet(id);
 
             // 부모 ID 인덱스 추가
             for (Map.Entry<Field, Class<?>> entry : parentEntityClassMap.entrySet()) {
@@ -380,7 +382,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
      * 임시 ID(음수)나 null은 추적하지 않습니다.
      */
     private void trackDeletedId(ID id) {
-        if (id == null) return;
+        if (id == null)
+            return;
         // 임시(음수) ID는 DB에 없으므로 추적 불필요
         if (!useIdPool && id instanceof Number number && number.longValue() < 0L) {
             return;
@@ -400,6 +403,26 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
      */
     public void clearDeletedIds() {
         getCacheStore().delete(getDeletedSetKey());
+    }
+
+    /**
+     * DELETED Set에서 특정 ID를 제거합니다.
+     * Undo/Redo로 엔티티가 복원될 때 호출하여, 동기화 시 잘못 삭제되는 것을 방지합니다.
+     */
+    public void removeFromDeletedSet(ID id) {
+        if (id == null)
+            return;
+        getCacheStore().removeFromSet(getDeletedSetKey(), String.valueOf(id));
+    }
+
+    /**
+     * DELETED Set에서 특정 ID를 제거합니다 (타입 체크 없는 버전).
+     */
+    @SuppressWarnings("unchecked")
+    public void removeFromDeletedSetUnchecked(Object id) {
+        if (id == null)
+            return;
+        removeFromDeletedSet((ID) id);
     }
 
     private String getParentIndexField(Class<?> parentClass, Object parentId) {
@@ -539,6 +562,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
         String hashKey = getRedisKey(id);
         getCacheStore().hashSet(hashKey, String.valueOf(id), dto);
+        removeFromDeletedSet(id);
 
         // 부모 ID 인덱스 추가
         for (Map.Entry<Field, Class<?>> entry : parentEntityClassMap.entrySet()) {
@@ -571,6 +595,7 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         }
 
         String hashKey = getRedisKey(id);
+        removeFromDeletedSet(id);
         DTO existingDto = getCacheStore().hashGet(hashKey, String.valueOf(id));
         List<Object> oldParentIds = Collections.emptyList();
         if (existingDto != null) {
@@ -965,8 +990,9 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
                 .toList();
 
         // 2. 기존 캐시 데이터 삭제 (인덱스 포함)
+        // 캐시 갱신 목적이므로 DELETED SET 추적 없이 캐시만 삭제
         try {
-            deleteByParentId(parentId, parentClass);
+            deleteCacheOnlyByParentId(parentId, parentClass);
         } catch (Exception e) {
             // ignore or log
         }
@@ -1693,6 +1719,28 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         deleteCacheById((ID) id);
     }
 
+    /**
+     * 캐시에서만 삭제 (DELETED SET 추적 없음).
+     * DB에서 다시 로딩하여 캐시를 갱신하거나, 동기화 후 캐시를 정리할 때 사용.
+     */
+    public void deleteCacheOnlyById(ID id) {
+        if (id == null) {
+            return;
+        }
+        deleteCacheOnlyCascade(id);
+    }
+
+    /**
+     * 캐시에서만 삭제 (타입 체크 없는 버전).
+     */
+    @SuppressWarnings("unchecked")
+    public void deleteCacheOnlyByIdUnchecked(Object id) {
+        if (id == null) {
+            return;
+        }
+        deleteCacheOnlyById((ID) id);
+    }
+
     private void deleteCacheCascade(ID id) {
         if (id == null) {
             return;
@@ -1719,6 +1767,94 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
 
         propagateParentDeletion(id);
         getCacheStore().hashDelete(hashKey, String.valueOf(id));
+    }
+
+    /**
+     * 캐시에서만 삭제 (DELETED SET 추적 없음).
+     * DB에서 다시 로딩하여 캐시를 갱신할 때 사용.
+     * trackDeletedId를 호출하지 않으므로 동기화 시 DB 데이터가 잘못 삭제되지 않음.
+     */
+    private void deleteCacheOnlyCascade(ID id) {
+        if (id == null) {
+            return;
+        }
+
+        String hashKey = getRedisKey(id);
+        DTO dto = getCacheStore().hashGet(hashKey, String.valueOf(id));
+        if (dto != null) {
+            for (Map.Entry<Field, Class<?>> entry : parentEntityClassMap.entrySet()) {
+                try {
+                    Object parentId = entry.getKey().get(dto);
+                    if (parentId != null) {
+                        removeIdFromParentIndex(hashKey, entry.getValue(), parentId, id);
+                    }
+                } catch (IllegalAccessException e) {
+                    // ignore
+                }
+            }
+        }
+
+        propagateCacheOnlyParentDeletion(id);
+        getCacheStore().hashDelete(hashKey, String.valueOf(id));
+    }
+
+    /**
+     * 자식 엔티티를 캐시에서만 삭제 (DELETED SET 추적 없음).
+     */
+    @SuppressWarnings("unchecked")
+    private void propagateCacheOnlyParentDeletion(Object parentIdObject) {
+        if (parentIdObject == null) {
+            return;
+        }
+
+        Map<String, AutoCacheRepository<?, ?, ?>> repositories = (Map<String, AutoCacheRepository<?, ?, ?>>) (Map<?, ?>) applicationContext
+                .getBeansOfType(AutoCacheRepository.class);
+        Class<T> entityClass = getEntityClass();
+
+        for (AutoCacheRepository<?, ?, ?> repository : repositories.values()) {
+            if (repository == this) {
+                continue;
+            }
+            if (repository.parentEntityClassMap.isEmpty()) {
+                continue;
+            }
+            for (Class<?> parentClass : repository.parentEntityClassMap.values()) {
+                if (parentClass.isAssignableFrom(entityClass)) {
+                    repository.removeCacheOnlyEntriesByParentInternal(parentIdObject, parentClass);
+                }
+            }
+        }
+    }
+
+    /**
+     * 부모 ID에 해당하는 자식 엔티티를 캐시에서만 삭제 (DELETED SET 추적 없음).
+     */
+    @SuppressWarnings("unchecked")
+    private <PID> void removeCacheOnlyEntriesByParentInternal(Object parentIdObject, Class<?> parentClass) {
+        PID parentId = (PID) parentIdObject;
+        List<DTO> childDtos = findDtosByParentId(parentId, parentClass);
+        childDtos.stream()
+                .map(this::extractId)
+                .forEach(this::deleteCacheOnlyCascade);
+    }
+
+    /**
+     * ParentId로 캐시에서만 삭제 (DELETED SET 추적 없음).
+     * DB에서 다시 로딩하여 캐시를 갱신할 때 사용.
+     */
+    public void deleteCacheOnlyByParentId(Object parentId, Class<?> parentClass) {
+        if (parentIdFields.isEmpty()) {
+            return;
+        }
+
+        List<DTO> dtosToDelete = findDtosByParentId(parentId, parentClass);
+        if (dtosToDelete.isEmpty()) {
+            return;
+        }
+
+        dtosToDelete.stream()
+                .map(this::extractId)
+                .forEach(this::deleteCacheOnlyCascade);
     }
 
     /**
@@ -2022,7 +2158,8 @@ public abstract class AutoCacheRepository<T, ID, DTO extends CacheDto<ID>> imple
         for (String idStr : deletedIdStrings) {
             try {
                 ID typedId = convertStringToId(idStr);
-                if (typedId == null) continue;
+                if (typedId == null)
+                    continue;
 
                 T entity = (T) entityManager.find(getEntityClass(), typedId);
                 if (entity != null) {

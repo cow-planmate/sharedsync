@@ -60,7 +60,8 @@ public class HistoryService {
 
     public void record(String rootId, HistoryAction action) {
         String sessionId = getCurrentSessionId();
-        if (!isSupported() || rootId == null || sessionId == null) return;
+        if (!isSupported() || rootId == null || sessionId == null)
+            return;
 
         String undoKey = UNDO_PREFIX + rootId + ":" + sessionId;
         String redoKey = REDO_PREFIX + rootId + ":" + sessionId;
@@ -73,7 +74,8 @@ public class HistoryService {
     public HistoryAction undo(String rootId) {
         String sessionId = getCurrentSessionId();
         HistoryAction action = popUndo(rootId, sessionId);
-        if (action == null) return null;
+        if (action == null)
+            return null;
 
         setSkipHistory(true);
         try {
@@ -92,7 +94,8 @@ public class HistoryService {
     public HistoryAction redo(String rootId) {
         String sessionId = getCurrentSessionId();
         HistoryAction action = popRedo(rootId, sessionId);
-        if (action == null) return null;
+        if (action == null)
+            return null;
 
         setSkipHistory(true);
         try {
@@ -109,7 +112,8 @@ public class HistoryService {
     }
 
     private void publishChange(String rootId, HistoryAction action, boolean isUndo) {
-        if (redisSyncService == null || action.getEntityName() == null) return;
+        if (redisSyncService == null || action.getEntityName() == null)
+            return;
 
         Map<String, Object> response = new HashMap<>();
         response.put("entity", action.getEntityName());
@@ -153,17 +157,19 @@ public class HistoryService {
         }
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     private boolean applyInverse(HistoryAction action) {
         AutoCacheRepository repo = findRepository(action.getDtoClassName());
-        if (repo == null) return false;
+        if (repo == null)
+            return false;
 
         boolean success = false;
         switch (action.getType()) {
             case CREATE:
                 // Undo CREATE: Delete if current state matches afterData
                 for (CacheDto<?> dto : (List<CacheDto<?>>) action.getAfterData()) {
-                    if (!isSameState(repo.findDtoById(dto.getId()), dto)) return false;
+                    if (!isSameState(repo.findDtoById(dto.getId()), dto))
+                        return false;
                 }
                 repo.deleteAllById(extractIds(action.getAfterData()));
                 success = true;
@@ -171,7 +177,8 @@ public class HistoryService {
             case UPDATE:
                 // Undo UPDATE: Restore beforeData if current state matches afterData
                 for (CacheDto<?> dto : (List<CacheDto<?>>) action.getAfterData()) {
-                    if (!isSameState(repo.findDtoById(dto.getId()), dto)) return false;
+                    if (!isSameState(repo.findDtoById(dto.getId()), dto))
+                        return false;
                 }
                 repo.saveAll(action.getBeforeData());
                 success = true;
@@ -179,9 +186,14 @@ public class HistoryService {
             case DELETE:
                 // Undo DELETE: Restore beforeData if current state is null
                 for (CacheDto<?> dto : (List<CacheDto<?>>) action.getBeforeData()) {
-                    if (repo.findDtoById(dto.getId()) != null) return false;
+                    if (repo.findDtoById(dto.getId()) != null)
+                        return false;
                 }
                 repo.saveAll(action.getBeforeData());
+                // 복원된 ID를 DELETED Set에서 제거 (동기화 시 잘못 삭제되는 것을 방지)
+                for (CacheDto<?> dto : (List<CacheDto<?>>) action.getBeforeData()) {
+                    repo.removeFromDeletedSetUnchecked(dto.getId());
+                }
                 success = true;
                 break;
         }
@@ -194,25 +206,32 @@ public class HistoryService {
         return success;
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     private boolean applyAction(HistoryAction action) {
         AutoCacheRepository repo = findRepository(action.getDtoClassName());
-        if (repo == null) return false;
+        if (repo == null)
+            return false;
 
         boolean success = false;
         switch (action.getType()) {
             case CREATE:
                 // Redo CREATE: Save if current state is null
                 for (CacheDto<?> dto : (List<CacheDto<?>>) action.getAfterData()) {
-                    if (repo.findDtoById(dto.getId()) != null) return false;
+                    if (repo.findDtoById(dto.getId()) != null)
+                        return false;
                 }
                 repo.saveAll(action.getAfterData());
+                // 복원된 ID를 DELETED Set에서 제거 (이전 Undo CREATE에서 추가된 것 제거)
+                for (CacheDto<?> dto : (List<CacheDto<?>>) action.getAfterData()) {
+                    repo.removeFromDeletedSetUnchecked(dto.getId());
+                }
                 success = true;
                 break;
             case UPDATE:
                 // Redo UPDATE: Restore afterData if current state matches beforeData
                 for (CacheDto<?> dto : (List<CacheDto<?>>) action.getBeforeData()) {
-                    if (!isSameState(repo.findDtoById(dto.getId()), dto)) return false;
+                    if (!isSameState(repo.findDtoById(dto.getId()), dto))
+                        return false;
                 }
                 repo.saveAll(action.getAfterData());
                 success = true;
@@ -220,7 +239,8 @@ public class HistoryService {
             case DELETE:
                 // Redo DELETE: Delete if current state matches beforeData
                 for (CacheDto<?> dto : (List<CacheDto<?>>) action.getBeforeData()) {
-                    if (!isSameState(repo.findDtoById(dto.getId()), dto)) return false;
+                    if (!isSameState(repo.findDtoById(dto.getId()), dto))
+                        return false;
                 }
                 repo.deleteAllById(extractIds(action.getBeforeData()));
                 success = true;
@@ -236,8 +256,10 @@ public class HistoryService {
     }
 
     private boolean isSameState(Object current, Object expected) {
-        if (current == null && expected == null) return true;
-        if (current == null || expected == null) return false;
+        if (current == null && expected == null)
+            return true;
+        if (current == null || expected == null)
+            return false;
         try {
             return objectMapper.writeValueAsString(current).equals(objectMapper.writeValueAsString(expected));
         } catch (Exception e) {
@@ -246,7 +268,8 @@ public class HistoryService {
     }
 
     private List<?> extractIds(List<? extends CacheDto<?>> dtos) {
-        if (dtos == null) return java.util.Collections.emptyList();
+        if (dtos == null)
+            return java.util.Collections.emptyList();
         return dtos.stream()
                 .map(CacheDto::getId)
                 .filter(Objects::nonNull)
@@ -261,27 +284,32 @@ public class HistoryService {
     }
 
     public HistoryAction popUndo(String rootId, String sessionId) {
-        if (!isSupported() || rootId == null || sessionId == null) return null;
+        if (!isSupported() || rootId == null || sessionId == null)
+            return null;
         return (HistoryAction) redisTemplate.opsForList().leftPop(UNDO_PREFIX + rootId + ":" + sessionId);
     }
 
     public void pushUndo(String rootId, String sessionId, HistoryAction action) {
-        if (!isSupported() || rootId == null || sessionId == null) return;
+        if (!isSupported() || rootId == null || sessionId == null)
+            return;
         redisTemplate.opsForList().leftPush(UNDO_PREFIX + rootId + ":" + sessionId, action);
     }
 
     public HistoryAction popRedo(String rootId, String sessionId) {
-        if (!isSupported() || rootId == null || sessionId == null) return null;
+        if (!isSupported() || rootId == null || sessionId == null)
+            return null;
         return (HistoryAction) redisTemplate.opsForList().leftPop(REDO_PREFIX + rootId + ":" + sessionId);
     }
 
     public void pushRedo(String rootId, String sessionId, HistoryAction action) {
-        if (!isSupported() || rootId == null || sessionId == null) return;
+        if (!isSupported() || rootId == null || sessionId == null)
+            return;
         redisTemplate.opsForList().leftPush(REDO_PREFIX + rootId + ":" + sessionId, action);
     }
 
     public void clearHistory(String rootId, String sessionId) {
-        if (!isSupported() || rootId == null || sessionId == null) return;
+        if (!isSupported() || rootId == null || sessionId == null)
+            return;
         redisTemplate.delete(UNDO_PREFIX + rootId + ":" + sessionId);
         redisTemplate.delete(REDO_PREFIX + rootId + ":" + sessionId);
     }

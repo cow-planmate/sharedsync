@@ -99,7 +99,7 @@ public class CacheSyncService {
                     log.info("[CacheSync] Transaction committed. Starting batch cache deletion for rootId={}", rootId);
                     for (CacheDeletionEntry entry : deletionQueue) {
                         try {
-                            entry.repository.deleteCacheByIdUnchecked(entry.id);
+                            entry.repository.deleteCacheOnlyByIdUnchecked(entry.id);
                         } catch (Exception e) {
                             log.error("[CacheSync] Failed to delete cache for id={} in repo={}", entry.id,
                                     entry.repository.getClass().getSimpleName(), e);
@@ -111,7 +111,7 @@ public class CacheSyncService {
             // 트랜잭션이 없는 경우 (거의 없겠지만) 즉시 삭제
             log.warn("[CacheSync] No active transaction. Deleting cache immediately for rootId={}", rootId);
             for (CacheDeletionEntry entry : deletionQueue) {
-                entry.repository.deleteCacheByIdUnchecked(entry.id);
+                entry.repository.deleteCacheOnlyByIdUnchecked(entry.id);
             }
         }
     }
