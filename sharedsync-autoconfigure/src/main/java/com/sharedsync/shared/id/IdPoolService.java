@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -129,13 +130,17 @@ public class IdPoolService {
         if (redisTemplate == null) {
             return null;
         }
+
         try {
             String redisKey = REDIS_KEY_PREFIX + sequenceName;
             Object popped = redisTemplate.opsForSet().pop(redisKey);
-            if (popped == null) {
-                return null;
+            
+            if (popped instanceof Number) {
+                return ((Number) popped).longValue();
+            } else if (popped instanceof String) {
+                return Long.parseLong((String) popped);
             }
-            return Long.parseLong(String.valueOf(popped));
+            return null;
         } catch (Exception e) {
             log.warn("[IdPoolService] Redis SPOP failed for '{}': {}", sequenceName, e.getMessage());
             return null;
@@ -168,7 +173,8 @@ public class IdPoolService {
         }
         try {
             String redisKey = REDIS_KEY_PREFIX + sequenceName;
-            Object[] values = ids.stream().map(String::valueOf).toArray();
+            // Redis에 넣을 때는 문자열 대신 숫자 타입 그대로 전달 (객체 직렬화 설정에 따름)
+            Object[] values = ids.toArray();
             redisTemplate.opsForSet().add(redisKey, values);
         } catch (Exception e) {
             log.warn("[IdPoolService] Redis SADD failed for '{}': {}", sequenceName, e.getMessage());
@@ -183,9 +189,11 @@ public class IdPoolService {
     private void refillPool(IdPool pool) {
         try {
             List<Long> ids = fetchIdsFromSequence(pool.getSequenceName(), pool.getAllocationSize());
-            saveIdsToRedis(pool.getSequenceName(), ids);
-            log.info("[IdPoolService] Pool refilled asynchronously: sequenceName={}, count={}, redisPoolSize={}",
-                    pool.getSequenceName(), ids.size(), getRedisPoolSize(pool.getSequenceName()));
+            if (!ids.isEmpty()) {
+                saveIdsToRedis(pool.getSequenceName(), ids);
+                log.info("[IdPoolService] Pool refilled asynchronously: sequenceName={}, count={}, redisPoolSize={}",
+                        pool.getSequenceName(), ids.size(), getRedisPoolSize(pool.getSequenceName()));
+            }
         } catch (Exception e) {
             log.error("[IdPoolService] Async pool refill failed for '{}': {}", pool.getSequenceName(), e.getMessage());
         }
@@ -196,36 +204,51 @@ public class IdPoolService {
      */
     private void refillPoolSync(IdPool pool) {
         List<Long> ids = fetchIdsFromSequence(pool.getSequenceName(), pool.getAllocationSize());
-        saveIdsToRedis(pool.getSequenceName(), ids);
-        log.info("[IdPoolService] Pool refilled synchronously: sequenceName={}, count={}, redisPoolSize={}",
-                pool.getSequenceName(), ids.size(), getRedisPoolSize(pool.getSequenceName()));
+        if (!ids.isEmpty()) {
+            saveIdsToRedis(pool.getSequenceName(), ids);
+            log.info("[IdPoolService] Pool refilled synchronously: sequenceName={}, count={}, redisPoolSize={}",
+                    pool.getSequenceName(), ids.size(), getRedisPoolSize(pool.getSequenceName()));
+        }
     }
 
     // ==== DB 시퀀스 메서드 ====
 
     /**
      * PostgreSQL 시퀀스에서 N개의 ID를 가져옵니다.
+     * generate_series를 사용하여 단일 쿼리로 배치 할당을 수행합니다.
      */
+    @SuppressWarnings("unchecked")
     private List<Long> fetchIdsFromSequence(String sequenceName, int count) {
         if (entityManager == null) {
             throw new IllegalStateException("[IdPoolService] EntityManager is not available");
         }
 
-        List<Long> ids = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            Object result = entityManager
-                    .createNativeQuery("SELECT nextval(:seqName)")
-                    .setParameter("seqName", sequenceName)
-                    .getSingleResult();
-            ids.add(((Number) result).longValue());
+        if (count <= 0) {
+            return new ArrayList<>();
         }
 
-        log.debug("[IdPoolService] Fetched {} IDs from sequence '{}': range [{} ~ {}]",
-                count, sequenceName,
-                ids.isEmpty() ? "N/A" : ids.get(0),
-                ids.isEmpty() ? "N/A" : ids.get(ids.size() - 1));
+        try {
+            // PostgreSQL 전용 배치 시퀀스 할당 쿼리
+            String sql = "SELECT nextval(:seqName) FROM generate_series(1, :count)";
+            List<Number> results = entityManager.createNativeQuery(sql)
+                    .setParameter("seqName", sequenceName)
+                    .setParameter("count", count)
+                    .getResultList();
 
-        return ids;
+            List<Long> ids = results.stream()
+                    .map(Number::longValue)
+                    .collect(Collectors.toList());
+
+            if (log.isDebugEnabled() && !ids.isEmpty()) {
+                log.debug("[IdPoolService] Fetched {} IDs from sequence '{}': range [{} ~ {}]",
+                        ids.size(), sequenceName, ids.get(0), ids.get(ids.size() - 1));
+            }
+
+            return ids;
+        } catch (Exception e) {
+            log.error("[IdPoolService] Failed to fetch serial IDs from sequence '{}': {}", sequenceName, e.getMessage());
+            throw new RuntimeException("ID 할당 중 오류가 발생했습니다.", e);
+        }
     }
 
     // ==== 상태 조회/관리 메서드 ====
