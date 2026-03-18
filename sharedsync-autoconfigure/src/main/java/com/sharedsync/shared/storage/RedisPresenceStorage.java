@@ -22,6 +22,8 @@ public class RedisPresenceStorage implements PresenceStorage {
     private static final String USER_INFO = "PRESENCE:USER_INFO:";
     private static final String USER_SESSIONS = "PRESENCE:USER_SESSIONS:";
     private static final String SYNC_LOCK = "PRESENCE:SYNC_LOCK:";
+    private static final String CACHE_LOADING = "CACHE:LOADING:";
+    private static final String SYNC_COMPLETE = "PRESENCE:SYNC_COMPLETE:";
 
     @Override
     public boolean hasTracker(String rootId) {
@@ -150,10 +152,8 @@ public class RedisPresenceStorage implements PresenceStorage {
             candidateUserIds.add(parts[0]);
         }
 
-        List<Object> sessionValues = new ArrayList<>();
-        for (String sessionKey : sessionRedisKeys) {
-            sessionValues.add(redis.opsForValue().get(sessionKey));
-        }
+        // multiGet을 사용하여 한 번에 조회 (N+1 문제 해결)
+        List<Object> sessionValues = redis.opsForValue().multiGet(sessionRedisKeys);
 
         log.debug("[RedisStorage] Checking session activity for rootId={}, sessionCount={}", rootId,
                 sessionRedisKeys.size());
@@ -161,7 +161,8 @@ public class RedisPresenceStorage implements PresenceStorage {
         List<String> removedUserIds = new ArrayList<>();
 
         for (int i = 0; i < sessionRedisKeys.size(); i++) {
-            if (sessionValues != null && i < sessionValues.size() && sessionValues.get(i) != null) {
+            Object sessionVal = (sessionValues != null && i < sessionValues.size()) ? sessionValues.get(i) : null;
+            if (sessionVal != null) {
                 activeUserIds.add(candidateUserIds.get(i));
             } else {
                 log.info("[RedisStorage] Session expired or invalid, cleaning up: {}", trackerKeys.get(i));
@@ -204,7 +205,7 @@ public class RedisPresenceStorage implements PresenceStorage {
 
     @Override
     public void setIsLoading(String rootId, boolean isLoading) {
-        String key = "CACHE:LOADING:" + rootId;
+        String key = CACHE_LOADING + rootId;
         if (isLoading) {
             redis.opsForValue().set(key, "TRUE", java.time.Duration.ofSeconds(60));
         } else {
@@ -214,7 +215,7 @@ public class RedisPresenceStorage implements PresenceStorage {
 
     @Override
     public boolean isLoading(String rootId) {
-        String key = "CACHE:LOADING:" + rootId;
+        String key = CACHE_LOADING + rootId;
         return Boolean.TRUE.equals(redis.hasKey(key));
     }
 
@@ -238,7 +239,7 @@ public class RedisPresenceStorage implements PresenceStorage {
             return;
         }
 
-        String channel = "PRESENCE:SYNC_COMPLETE:" + rootId;
+        String channel = SYNC_COMPLETE + rootId;
         java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
 
         org.springframework.data.redis.connection.MessageListener listener = (message, pattern) -> {
@@ -270,7 +271,7 @@ public class RedisPresenceStorage implements PresenceStorage {
 
     @Override
     public void notifySyncComplete(String rootId) {
-        redis.convertAndSend("PRESENCE:SYNC_COMPLETE:" + rootId, "DONE");
+        redis.convertAndSend(SYNC_COMPLETE + rootId, "DONE");
     }
 
     @Override
