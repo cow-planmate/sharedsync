@@ -46,6 +46,8 @@ public class AutoCacheRepositoryResilienceTest {
         java.lang.reflect.Field field = AutoCacheRepository.class.getDeclaredField("applicationContext");
         field.setAccessible(true);
         field.set(repository, applicationContext);
+        
+        repository.initHelpers();
     }
 
     @Test
@@ -119,16 +121,15 @@ public class AutoCacheRepositoryResilienceTest {
         @CacheId
         private UUID id;
 
-        @Override
         public UUID getId() {
             return id;
         }
 
-        @Override
         public void setId(UUID id) {
             this.id = id;
         }
 
+        @com.sharedsync.shared.annotation.EntityConverter
         public TestEntity toEntity() {
             return new TestEntity();
         }
