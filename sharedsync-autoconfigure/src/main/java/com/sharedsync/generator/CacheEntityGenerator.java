@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.Writer;
 
 import javax.annotation.processing.ProcessingEnvironment;
+import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
 
 import com.sharedsync.generator.Generator.CacheInformation;
@@ -34,9 +35,10 @@ public class CacheEntityGenerator{
             writer.write(source);
             writer.close();
         } catch (IOException e) {
-            e.printStackTrace();
+            processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
+                    "[SharedSync] Failed to write CacheEntity source file: " + e.getMessage());
         }
-        
+
         return true;
     }
 

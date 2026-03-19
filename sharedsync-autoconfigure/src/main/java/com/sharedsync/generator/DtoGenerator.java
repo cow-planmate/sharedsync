@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Set;
 
 import javax.annotation.processing.ProcessingEnvironment;
+import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
 
 import com.sharedsync.generator.Generator.CacheInformation;
@@ -49,7 +50,8 @@ public class DtoGenerator {
                 writer.write(source);
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
+                    "[SharedSync] Failed to write DTO source file: " + e.getMessage());
         }
 
         return true;

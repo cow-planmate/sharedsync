@@ -43,11 +43,14 @@ import com.sharedsync.shared.repository.RedisCacheStore;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.ReadFrom;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Redis 캐시 설정.
  * sharedsync.cache.type=redis 일 때만 활성화됩니다.
  * 기본값은 인메모리 캐시를 사용합니다.
  */
+@Slf4j
 @EnableCaching
 @Configuration
 @ConditionalOnProperty(name = "sharedsync.cache.type", havingValue = "redis")
@@ -207,7 +210,7 @@ public class RedisConfig implements ApplicationContextAware {
         template.setConnectionFactory(connectionFactory);
         configureSerializers(template, serializer);
         template.afterPropertiesSet();
-        System.out.println("[SharedSync] Using Redis cache store");
+        log.info("[SharedSync] Using Redis cache store");
         return new RedisCacheStore<>(template);
     }
 

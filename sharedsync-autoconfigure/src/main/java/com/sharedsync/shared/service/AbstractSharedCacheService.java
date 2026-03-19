@@ -114,6 +114,7 @@ public abstract class AbstractSharedCacheService<Req extends WRequest, Res exten
         List<DTO> before = payload.stream()
                 .map(idExtractor)
                 .map(cacheRepository::findDtoById)
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
         List<DTO> updated = payload.stream()
@@ -140,6 +141,7 @@ public abstract class AbstractSharedCacheService<Req extends WRequest, Res exten
         List<DTO> before = payload.stream()
                 .map(idExtractor)
                 .map(cacheRepository::findDtoById)
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
         List<ID> ids = payload.stream()

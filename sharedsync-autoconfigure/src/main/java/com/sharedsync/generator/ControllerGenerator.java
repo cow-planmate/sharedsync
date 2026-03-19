@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.Writer;
 
 import javax.annotation.processing.ProcessingEnvironment;
+import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
 
 import com.sharedsync.generator.Generator.CacheInformation;
@@ -155,7 +156,8 @@ public class ControllerGenerator {
 			writer.write(source.toString());
 			writer.close();
 		} catch (IOException e) {
-			e.printStackTrace();
+			processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
+					"[SharedSync] Failed to write Controller source file: " + e.getMessage());
 		}
 	}
 

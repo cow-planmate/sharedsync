@@ -11,6 +11,9 @@ import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Root;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 public class CriteriaQueryBuilder<T, ID> {
 
     private final EntityManager entityManager;
@@ -59,7 +62,7 @@ public class CriteriaQueryBuilder<T, ID> {
                         jakarta.persistence.criteria.Path<?> parentIdPath = parentPath.get(idFieldName);
                         predicates.add(cb.equal(parentIdPath, normalizedParentId));
                     } catch (Exception e) {
-                        System.err.println("[SharedSync][WARN] Failed to build predicate for field " + field.getName() + ": " + e.getMessage());
+                        log.warn("[SharedSync][WARN] Failed to build predicate for field {}: {}", field.getName(), e.getMessage());
                     }
                 }
             }

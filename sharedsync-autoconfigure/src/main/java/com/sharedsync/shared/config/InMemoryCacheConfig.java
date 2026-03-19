@@ -6,6 +6,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.sharedsync.shared.repository.CacheStore;
 import com.sharedsync.shared.repository.InMemoryCacheStore;
 
@@ -22,6 +24,7 @@ import com.sharedsync.shared.repository.InMemoryCacheStore;
  * 인메모리 캐시는 단일 인스턴스 환경에 적합합니다.
  * 다중 인스턴스/분산 환경에서는 Redis를 사용하세요.
  */
+@Slf4j
 @Configuration
 public class InMemoryCacheConfig {
 
@@ -33,7 +36,7 @@ public class InMemoryCacheConfig {
     @ConditionalOnProperty(name = "sharedsync.cache.type", havingValue = "memory", matchIfMissing = true)
     @SuppressWarnings("rawtypes")
     public CacheStore inMemoryCacheStore() {
-        System.out.println("[SharedSync] Using InMemory cache store");
+        log.info("[SharedSync] Using InMemory cache store");
         return new InMemoryCacheStore<>();
     }
 
@@ -45,7 +48,7 @@ public class InMemoryCacheConfig {
     @ConditionalOnMissingBean(name = {"globalCacheStore", "redisConnectionFactory"})
     @SuppressWarnings("rawtypes")
     public CacheStore fallbackInMemoryCacheStore() {
-        System.out.println("[SharedSync] Redis not available, falling back to InMemory cache store");
+        log.info("[SharedSync] Redis not available, falling back to InMemory cache store");
         return new InMemoryCacheStore<>();
     }
 }

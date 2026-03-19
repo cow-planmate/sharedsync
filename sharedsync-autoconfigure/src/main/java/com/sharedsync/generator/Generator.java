@@ -246,9 +246,6 @@ public class Generator extends AbstractProcessor {
                             field.getAnnotation(jakarta.persistence.ManyToMany.class) != null){
                         relatedEntityName = relatedEntityName.replace(">", "");
                     }
-                    //
-                    System.out.println("EntityName:"+entityName+" Related Entity Detected: " + relatedEntityName);
-
                     // Determine the correct declared type to inspect for @Id
                     DeclaredType targetDeclared = null;
                     if (field.getAnnotation(jakarta.persistence.ManyToOne.class) != null ||
